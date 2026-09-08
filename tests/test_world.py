@@ -16,9 +16,26 @@ def test_blueprint_reachability(blueprint):
 
 def test_invalid_graph_and_references(blueprint):
     b=copy.deepcopy(blueprint);b['locations'][0]['exits']=['missing']
-    with pytest.raises(ValueError):validate_blueprint(b)
+    with pytest.raises(ValueError,match=r"l_hall\.exits.*missing"):validate_blueprint(b)
     b=copy.deepcopy(blueprint);b['truth']['culprits']=['n_missing']
     with pytest.raises(ValueError):validate_blueprint(b)
+
+
+def test_one_sided_location_exit_is_canonicalized(blueprint):
+    blueprint['locations'][1]['exits']=[]
+    normalized=validate_blueprint(blueprint)
+    assert normalized['locations'][0]['exits']==['l_garden']
+    assert normalized['locations'][1]['exits']==['l_hall']
+    assert blueprint['locations'][1]['exits']==[]
+
+
+def test_disconnected_and_self_loop_locations_report_exact_ids(blueprint):
+    blueprint['locations'][0]['exits']=['l_hall']
+    blueprint['locations'][1]['exits']=[]
+    with pytest.raises(ValueError) as error:
+        validate_blueprint(blueprint)
+    assert 'l_hall.exits contains itself' in str(error.value)
+    assert "['l_garden'] are disconnected" in str(error.value)
 
 
 def test_no_unwarned_arbitrary_escape(blueprint):

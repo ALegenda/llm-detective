@@ -38,17 +38,33 @@ def validate_blueprint(raw):
     if not 2 <= len(loc) <= 8 or not 2 <= len(people) <= 8 or not 4 <= len(checks) <= 30:
         errors.append('Case size outside supported bounds')
     if b['start_location'] not in loc:
-        errors.append('Missing start location')
-    reachable = {b['start_location']}
-    for _ in range(len(loc)):
-        for l in loc.values():
-            if l['id'] in reachable:
-                reachable.update(l['exits'])
-            for x in l['exits']:
-                if x not in loc or l['id'] not in loc[x]['exits']:
-                    errors.append('Exits must exist and be reciprocal')
-    if set(loc) - reachable:
-        errors.append('Disconnected locations')
+        errors.append(f"start_location={b['start_location']} does not name an existing location; allowed ids: {sorted(loc)}")
+    # Exits describe an undirected physical passage. A missing reverse entry is
+    # unambiguous structured-output noise, not a plot contradiction: normalize
+    # it instead of spending paid model retries on the same clerical repair.
+    for l in loc.values():
+        l['exits'] = list(dict.fromkeys(l['exits']))
+        unknown = sorted(set(l['exits']) - set(loc))
+        if unknown:
+            errors.append(f"Location {l['id']}.exits has unknown ids {unknown}; allowed location ids: {sorted(loc)}")
+        if l['id'] in l['exits']:
+            errors.append(f"Location {l['id']}.exits contains itself; remove the self-loop")
+    for l in loc.values():
+        for destination in l['exits']:
+            if destination in loc and destination != l['id'] and l['id'] not in loc[destination]['exits']:
+                loc[destination]['exits'].append(l['id'])
+    reachable = set()
+    if b['start_location'] in loc:
+        frontier = [b['start_location']]
+        while frontier:
+            current = frontier.pop()
+            if current in reachable:
+                continue
+            reachable.add(current)
+            frontier.extend(x for x in loc[current]['exits'] if x in loc)
+    disconnected = sorted(set(loc) - reachable)
+    if disconnected:
+        errors.append(f"Locations {disconnected} are disconnected from start_location={b['start_location']}")
     for o in objects.values():
         if o['location'] not in loc or (o['container'] and o['container'] not in objects):
             errors.append(f"Object {o['id']} location must be a location id (one of {list(loc)}), container must be an object id or empty; received location={o['location']} container={o['container']}")
