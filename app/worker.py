@@ -32,6 +32,16 @@ def generate(job, ai):
     checkpoint=json.loads(job['checkpoint']) if job['checkpoint'] else {}
     raw=checkpoint.get('blueprint')
     feedback=checkpoint.get('feedback',[])
+    # A deploy can make an old structural draft locally repairable. Revalidate
+    # it before paying for another rewrite, unless the semantic case review
+    # explicitly required plot changes.
+    if not raw and checkpoint.get('draft') and not checkpoint.get('needs_rewrite'):
+        try:
+            raw=validate_blueprint(checkpoint['draft'])
+        except ValueError:
+            pass
+        else:
+            db.save_checkpoint(job,{'blueprint':raw})
     if not raw:
         raw=ai.structured('blueprint',GENERATOR,{'settings':settings,'repair_feedback':feedback,'previous_draft':checkpoint.get('draft')},Blueprint)
         db.save_checkpoint(job,{'blueprint':raw})
