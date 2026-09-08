@@ -9,4 +9,5 @@ COPY scripts scripts
 USER detective
 VOLUME /data
 EXPOSE 8080
-CMD ["python", "-m", "uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8080", "--no-access-log"]
+# Render injects PORT (default 10000); local/compose keep 8080.
+CMD ["/bin/sh", "-c", "python -m uvicorn app.main:app --host 0.0.0.0 --port ${PORT:-8080} --no-access-log"]
