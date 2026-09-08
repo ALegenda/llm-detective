@@ -81,4 +81,15 @@ docker compose up --build
 
 Compose использует `.env`, постоянный volume для данных и порт 8080 на loopback. Для внешнего рабочего запуска настройте HTTPS reverse proxy, `APP_ENV=production` и соответствующий `APP_ORIGIN`. Готового облачного размещения эта команда не создаёт.
 
+## Развёртывание на Render
+
+В корне репозитория есть Blueprint [`render.yaml`](render.yaml): Docker web-сервис, диск `/data` для SQLite и ассетов, health-check `/api/health`. Нужен платный инстанс (`starter` и выше) — на Free нет persistent disk, а без него база и картинки пропадут при редеплое.
+
+1. Откройте [Blueprint Deploy](https://dashboard.render.com/blueprints/new?repo=https://github.com/ALegenda/llm-detective) (или **New → Blueprint** и выберите этот репозиторий).
+2. Подтвердите сервис `llm-detective` и при запросе укажите `OPENAI_API_KEY`.
+3. После деплоя URL вида `https://….onrender.com` подставится сам (`RENDER_EXTERNAL_URL` → `APP_ORIGIN`). При своём домене задайте `APP_ORIGIN` вручную.
+4. По желанию задайте `ADMIN_EMAILS` (через запятую) для `/#/admin`.
+
+Локальный Docker/`uvicorn` не меняются: `PORT` по умолчанию 8080, на Render — из окружения.
+
 [Архитектура](docs/ARCHITECTURE.md) · [Исходная спецификация](docs/PRODUCT_SPEC.md) · [Приёмка и границы реализации](docs/ACCEPTANCE.md)

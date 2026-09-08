@@ -1,0 +1,40 @@
+# Blueprint: https://dashboard.render.com/blueprints/new?repo=https://github.com/ALegenda/llm-detective
+# Requires a paid instance (persistent disk). Set OPENAI_API_KEY (and optional ADMIN_EMAILS) when prompted.
+services:
+  - type: web
+    name: llm-detective
+    runtime: docker
+    plan: starter
+    dockerfilePath: ./Dockerfile
+    dockerContext: .
+    healthCheckPath: /api/health
+    # Graceful worker drain can take up to ~240s (see app lifespan).
+    maxShutdownDelaySeconds: 300
+    disk:
+      name: detective-data
+      mountPath: /data
+      sizeGB: 1
+    envVars:
+      - key: APP_ENV
+        value: production
+      - key: DATA_DIR
+        value: /data
+      - key: PORT
+        value: "8080"
+      - key: WORKERS
+        value: "2"
+      - key: CASE_CALL_LIMIT
+        value: "140"
+      - key: ATTEMPT_CALL_LIMIT
+        value: "200"
+      - key: DAILY_CALL_LIMIT
+        value: "500"
+      - key: OPENAI_TEXT_MODEL
+        value: gpt-5.4-mini
+      - key: OPENAI_IMAGE_MODEL
+        value: gpt-image-1.5
+      # APP_ORIGIN is optional: app/config.py uses Render's RENDER_EXTERNAL_URL.
+      - key: OPENAI_API_KEY
+        sync: false
+      - key: ADMIN_EMAILS
+        value: ""
