@@ -17,7 +17,7 @@ PRODUCTION = os.getenv('APP_ENV') == 'production'
 ORIGIN = os.getenv('APP_ORIGIN', 'http://localhost:8080')
 ADMINS = {x.strip().lower() for x in os.getenv('ADMIN_EMAILS', '').split(',') if x.strip()}
 SCHEMA_VERSION = 2
-PROMPT_VERSION = '2026-09-08.2'
+PROMPT_VERSION = '2026-09-08.3'
 
 
 def preflight():

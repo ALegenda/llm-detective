@@ -217,9 +217,48 @@ def test_art_budget_cannot_consume_action_budget(client,monkeypatch):
 
 
 def test_evaluation_cannot_attribute_hidden_truth_to_player():
-    raw={'conclusion':'Частичная версия','claims':[{'quote':'Саша украла рукопись','status':'mistaken','feedback':'Не доказано'}],'missing':['Не установлена личность'],'evidence_assessment':[],'proved':True}
+    raw={'claims':[{'quote':'Саша украла рукопись','status':'mistaken','feedback':'Не доказано'}],'criteria':[{'criterion_index':0,'satisfied':False,'quote':'','evidence_ids':[],'feedback':'Не установлена личность'}],'evidence_assessment':[]}
+    rubric=[{'description':'Личность'}]
     with pytest.raises(InvalidContent,match='actually written'):
-        worker.grounded_evaluation(raw,'Рукопись перенесли. Кто это сделал, я не установил.',['f1'])
+        worker.grounded_evaluation(raw,'Рукопись перенесли. Кто это сделал, я не установил.',['f1'],rubric)
     raw['claims']=[{'quote':'Рукопись перенесли','status':'accurate','feedback':'Следы подтверждают перенос'}]
-    result=worker.grounded_evaluation(raw,'Рукопись перенесли. Кто это сделал, я не установил.',['f1'])
+    result=worker.grounded_evaluation(raw,'Рукопись перенесли. Кто это сделал, я не установил.',['f1'],rubric)
     assert not result['proved'] and not result['mistaken'] and result['missing']
+
+
+def test_evaluation_cannot_move_the_rubric_or_cite_unprovided_evidence():
+    text='Ирина перенесла письмо.'
+    rubric=[{'description':'Кто перенёс письмо'}]
+    raw={'claims':[{'quote':text,'status':'accurate','feedback':'Подтверждено'}],
+         'criteria':[{'criterion_index':0,'satisfied':True,'quote':text,'evidence_ids':['f1'],'feedback':'Достаточно'}],'evidence_assessment':[]}
+    assert worker.grounded_evaluation(raw,text,['f1'],rubric)['proved']
+    with pytest.raises(InvalidContent,match='did not provide'):worker.grounded_evaluation(raw,text,[],rubric)
+    raw['criteria'].append(dict(raw['criteria'][0],criterion_index=1))
+    with pytest.raises(InvalidContent,match='fixed rubric'):worker.grounded_evaluation(raw,text,['f1'],rubric)
+
+
+def test_finish_pipeline_persists_rubric_grounded_verdict(client,game):
+    b,s=game
+    explanation='Ирина перенесла письмо без взлома, чтобы скрыть перенос встречи.'
+    for check in b['checks']:
+        world.add_evidence(s,check['id'],check['intent'],check['result'],'observation','Контрольный источник')
+    with db.transaction() as con:con.execute('UPDATE attempts SET state=? WHERE id=?',(db.encode(s),'a1'))
+    evidence=[c['id'] for c in b['checks']]
+    response=client.post('/api/attempts/a1/commands',json={'kind':'finish','text':explanation,'evidence':evidence,'confirmed':True,'version':0},headers={'Idempotency-Key':'finish-rubric'})
+    assert response.status_code==202
+    job=db.claim()
+    class ControlledAI:
+        case=db.one('SELECT * FROM cases WHERE id=?',('c1',))
+        def structured(self,category,prompt,context,schema):
+            assert category=='evaluation'
+            raw={'claims':[{'quote':explanation,'status':'accurate','feedback':'Верно'}],
+                 'criteria':[{'criterion_index':i,'satisfied':True,'quote':explanation,'evidence_ids':evidence,'feedback':'Подтверждено'} for i in range(len(context['rubric']))],
+                 'evidence_assessment':['Сопоставлены независимые источники.']}
+            # Exercise the actual dynamic response schema before the reducer.
+            return schema.model_validate(raw).model_dump()
+    worker.command_job(job,ControlledAI())
+    finished=client.get('/api/attempts/a1').json()
+    assert finished['status']=='finished' and finished['verdict']['evaluation']['proved']
+    assert finished['world']['minute']==0 and finished['version']==1
+    assert len(finished['verdict']['evaluation']['criteria'])==4
+    assert finished['verdict']['truth']==b['truth']

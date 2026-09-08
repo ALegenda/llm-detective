@@ -162,12 +162,18 @@ class ClaimAssessment(Model):
     feedback: str
 
 
+class CriterionAssessment(Model):
+    criterion_index: int = Field(ge=0)
+    satisfied: bool
+    quote: str = Field(description='Exact passage from the player explanation establishing this criterion, or empty if not addressed.')
+    evidence_ids: list[str] = Field(description='Only IDs of actually cited evidence supporting this assessment.')
+    feedback: str
+
+
 class QuotedEvaluation(Model):
-    conclusion: str
     claims: list[ClaimAssessment]
-    missing: list[str] = Field(description='Important circumstances NOT addressed by the player. Describe as omissions, never as false assertions.')
+    criteria: list[CriterionAssessment]
     evidence_assessment: list[str]
-    proved: bool
 
 
 class VisualReview(Model):
