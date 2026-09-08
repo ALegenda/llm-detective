@@ -221,6 +221,26 @@ def test_generation_normalizes_missing_reverse_exit_without_retry(game,blueprint
     assert saved['status']=='done' and saved['repair_count']==0
 
 
+def test_generation_reuses_saved_draft_when_new_validator_can_normalize_it(game,blueprint):
+    one_sided=copy.deepcopy(blueprint)
+    one_sided['locations'][1]['exits']=[]
+    j=queue_job('generate')
+    db.save_checkpoint(j,{'draft':one_sided,'feedback':['Exits must exist and be reciprocal']})
+    j=db.one('SELECT * FROM jobs WHERE id=?',(j['id'],))
+    class ControlledAI:
+        case=db.one('SELECT * FROM cases WHERE id=?',('c1',))
+        calls=[]
+        def structured(self,category,prompt,context,schema):
+            self.calls.append(category)
+            assert category=='case_review'
+            garden=next(x for x in context['blueprint']['locations'] if x['id']=='l_garden')
+            assert garden['exits']==['l_hall']
+            return {'accepted':True,'issues':[],'alternative_routes':['letter then view','view then letter'],'reasoning_quality':'fair'}
+    ai=ControlledAI();worker.generate(j,ai)
+    assert ai.calls==['case_review']
+    assert db.one('SELECT status FROM jobs WHERE id=?',(j['id'],))['status']=='done'
+
+
 def test_art_budget_cannot_consume_action_budget(client,monkeypatch):
     from app.ai import AI
     from app import config
