@@ -1,6 +1,7 @@
 """Pure authoritative reducer. Only this layer can change a playable world."""
 import copy
 from . import db
+from .models import check_opens
 
 EMOTIONS = {'calm','warm','guarded','anxious','irritated','sad','surprised'}
 
@@ -48,7 +49,7 @@ def visible(o, s):
 
 
 def openable(b,obj):
-    return obj.get('openable',False) or obj['locked'] or any(o['container']==obj['id'] for o in b['objects']) or any(c['requires_open']==obj['id'] for c in b['checks'])
+    return obj.get('openable',False) or obj['locked'] or any(o['container']==obj['id'] for o in b['objects']) or any(c['requires_open']==obj['id'] or (c['object_id']==obj['id'] and check_opens(c)) for c in b['checks'])
 
 
 def public_world(b, s):
@@ -215,8 +216,15 @@ def reduce(b, old, steps, payload, speeches=None):
                     messages.append('Для этой проверки пока не хватает исходных наблюдений. Сначала исследуйте связанные предметы.'); break
                 if set(c['requires_tools'])-set(s['inventory']):
                     messages.append('Для проверки нужны инструменты: '+', '.join(objects[x]['name'] for x in set(c['requires_tools'])-set(s['inventory']))+'.'); break
-                if c['requires_open'] and not s['objects'][c['requires_open']]['open']:
+                opening=check_opens(c)
+                if c['requires_open'] and not s['objects'][c['requires_open']]['open'] and not (opening and c['requires_open']==target):
                     messages.append('Сначала нужно открыть '+objects[c['requires_open']]['name']+'.'); break
+                if opening:
+                    if os['locked'] and obj['key_id'] not in s['inventory']:
+                        messages.append('Заперто. Для открытия нужен подходящий ключ.'); break
+                    os.update(open=True,locked=False)
+                    for child in b['objects']:
+                        if s['objects'][child['id']]['container']==target:s['objects'][child['id']]['visible']=True
                 advance(b,s,c['minutes'],messages)
                 add_evidence(s,c['id'],c['intent'],c['result'],'observation',obj['name'])
                 for oid in c['reveals_objects']:

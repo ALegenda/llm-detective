@@ -187,3 +187,23 @@ def test_notebook_quotes_delivered_speech_not_unspoken_authored_account(game):
     s,_,_=world.reduce(b,s,[step('talk','n_ira')],P,{'0':speech})
     assert s['evidence'][-1]['text']==reply
     assert s['dialogue'][-1]['reply']==reply
+
+
+def test_opening_check_changes_container_and_cannot_bypass_lock(game):
+    b,s=game
+    b['checks'][0].update(opens_object=True)
+    s,_,_=world.reduce(b,s,[step('check','o_desk','f_lock')],P)
+    assert not s['objects']['o_desk']['open'] and s['minute']==0 and not s['evidence']
+    s,_,_=world.reduce(b,s,[step('take','o_key'),step('check','o_desk','f_lock')],P)
+    s=json.loads(json.dumps(s))
+    assert s['objects']['o_desk']['open'] and not s['objects']['o_desk']['locked']
+    assert world.visible(b['objects'][2],s)
+
+
+def test_legacy_authored_opening_check_has_persistent_effect(game):
+    b,s=game
+    b['checks'][0]['intent']='Open the desk and inspect its interior'
+    s,_,_=world.reduce(b,s,[step('take','o_key'),step('check','o_desk','f_lock')],P)
+    assert s['objects']['o_desk']['open']
+    normalized=validate_blueprint(b)
+    assert normalized['checks'][0]['opens_object']

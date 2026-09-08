@@ -32,6 +32,7 @@ class Thing(Model):
 
 
 class Check(Model):
+    opens_object: bool = False
     id: str
     object_id: str
     intent: str
@@ -201,3 +202,15 @@ class NoteInput(Model):
     kind: Literal['note','hypothesis','link','suspect'] = 'note'
     links: list[str] = Field(default_factory=list, max_length=20)
     version: int = Field(ge=0)
+
+
+def check_opens(check):
+    """Compatibility for saved v1 checks whose authored action explicitly opens a target.
+
+    Player phrasing is interpreted by the LLM; this only upgrades old case metadata.
+    New cases carry an explicit effect flag.
+    """
+    if 'opens_object' in check:
+        return check['opens_object']
+    import re
+    return bool(re.match(r'^(?:open\b|открыть\b|открываем\b)',check['intent'].strip(),re.I))
