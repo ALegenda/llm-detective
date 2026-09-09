@@ -25,7 +25,7 @@ TELEGRAM_CLIENT_ID = os.getenv('TELEGRAM_CLIENT_ID', '').strip()
 TELEGRAM_CLIENT_SECRET = os.getenv('TELEGRAM_CLIENT_SECRET', '').strip()
 TELEGRAM_ADMIN_IDS = {x.strip() for x in os.getenv('TELEGRAM_ADMIN_IDS', '').split(',') if x.strip()}
 TELEGRAM_ISSUER = 'https://oauth.telegram.org'
-SCHEMA_VERSION = 3
+SCHEMA_VERSION = 4
 PROMPT_VERSION = '2026-09-09.1'
 
 

@@ -194,12 +194,14 @@ def verify_telegram_token(token):
         issuer=config.TELEGRAM_ISSUER,
         options={'require':['iss','aud','sub','iat','exp']},
     )
-    telegram_id=str(claims['sub'])
-    if not re.fullmatch(r'[1-9][0-9]{0,24}',telegram_id):
+    subject=str(claims['sub'])
+    telegram_id=str(claims.get('id') or '')
+    if not subject or len(subject)>255:
         raise ValueError('invalid_subject')
-    if claims.get('id') is not None and str(claims['id'])!=telegram_id:
-        raise ValueError('identity_mismatch')
+    if not re.fullmatch(r'[1-9][0-9]{0,24}',telegram_id):
+        raise ValueError('invalid_telegram_id')
     return {
+        'subject':subject,
         'telegram_id':telegram_id,
         'name':str(claims.get('name') or claims.get('preferred_username') or 'Пользователь Telegram')[:200],
         'username':str(claims.get('preferred_username') or '')[:64],
@@ -246,15 +248,15 @@ def telegram_callback(request:Request,state:str='',code:str='',error:str=''):
         identity=verify_telegram_token(exchange_telegram_code(code,verifier))
         now=time.time()
         with db.transaction() as con:
-            current=con.execute('SELECT user_id FROM telegram_users WHERE telegram_id=?',(identity['telegram_id'],)).fetchone()
+            current=con.execute('SELECT user_id FROM telegram_users WHERE subject=?',(identity['subject'],)).fetchone()
             if current:
                 uid=current['user_id']
-                con.execute('UPDATE telegram_users SET name=?,username=? WHERE telegram_id=?',(identity['name'],identity['username'],identity['telegram_id']))
+                con.execute('UPDATE telegram_users SET telegram_id=?,name=?,username=? WHERE subject=?',(identity['telegram_id'],identity['name'],identity['username'],identity['subject']))
             else:
                 uid=db.uid()
                 email=f'telegram-{uid}@telegram.invalid'
                 con.execute('INSERT INTO users(id,email,password,created) VALUES(?,?,?,?)',(uid,email,password_hash(secrets.token_urlsafe(32)),now))
-                con.execute('INSERT INTO telegram_users(telegram_id,user_id,name,username,created) VALUES(?,?,?,?,?)',(identity['telegram_id'],uid,identity['name'],identity['username'],now))
+                con.execute('INSERT INTO telegram_users(telegram_id,subject,user_id,name,username,created) VALUES(?,?,?,?,?,?)',(identity['telegram_id'],identity['subject'],uid,identity['name'],identity['username'],now))
         token=issue_session(uid)
     except (httpx.HTTPError,jwt.PyJWTError,ValueError,KeyError,sqlite3.DatabaseError):
         return telegram_error('verification')

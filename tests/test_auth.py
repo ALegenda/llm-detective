@@ -1,3 +1,4 @@
+import sqlite3
 import time
 from types import SimpleNamespace
 from urllib.parse import parse_qs, urlparse
@@ -37,6 +38,7 @@ def test_telegram_login_registers_once_and_creates_session(isolated,monkeypatch)
     configure_telegram(monkeypatch)
     monkeypatch.setattr(main,'exchange_telegram_code',lambda code,verifier:'id-token')
     monkeypatch.setattr(main,'verify_telegram_token',lambda token:{
+        'subject':'1234123412341234123',
         'telegram_id':'777000',
         'name':'Следователь',
         'username':'detective',
@@ -68,6 +70,7 @@ def test_telegram_login_registers_once_and_creates_session(isolated,monkeypatch)
     assert response.status_code==303
     assert db.one('SELECT count(*) AS count FROM users')['count']==1
     assert db.one('SELECT count(*) AS count FROM telegram_users')['count']==1
+    assert db.one('SELECT subject FROM telegram_users')['subject']=='1234123412341234123'
     assert db.one('SELECT count(*) AS count FROM sessions')['count']==2
 
 
@@ -98,7 +101,7 @@ def test_telegram_token_signature_and_claims_are_verified(monkeypatch):
     claims={
         'iss':config.TELEGRAM_ISSUER,
         'aud':config.TELEGRAM_CLIENT_ID,
-        'sub':'777000',
+        'sub':'1234123412341234123',
         'id':777000,
         'iat':now,
         'exp':now+300,
@@ -108,6 +111,7 @@ def test_telegram_token_signature_and_claims_are_verified(monkeypatch):
 
     token=jwt.encode(claims,private_key,algorithm='RS256')
     assert main.verify_telegram_token(token)=={
+        'subject':'1234123412341234123',
         'telegram_id':'777000',
         'name':'Следователь',
         'username':'detective',
@@ -117,3 +121,23 @@ def test_telegram_token_signature_and_claims_are_verified(monkeypatch):
     wrong_audience=jwt.encode(claims,private_key,algorithm='RS256')
     with pytest.raises(jwt.InvalidAudienceError):
         main.verify_telegram_token(wrong_audience)
+
+
+def test_schema_three_telegram_identity_is_migrated(tmp_path,monkeypatch):
+    monkeypatch.setattr(config,'DATA',tmp_path)
+    monkeypatch.setattr(config,'DB_PATH',tmp_path/'detective.sqlite3')
+    with sqlite3.connect(config.DB_PATH) as con:
+        con.execute('CREATE TABLE users(id TEXT PRIMARY KEY,email TEXT UNIQUE NOT NULL,password TEXT NOT NULL,created REAL NOT NULL)')
+        con.execute('CREATE TABLE telegram_users(telegram_id TEXT PRIMARY KEY,user_id TEXT UNIQUE NOT NULL REFERENCES users(id),name TEXT NOT NULL,username TEXT NOT NULL,created REAL NOT NULL)')
+        con.execute("INSERT INTO users VALUES('u1','telegram@test.invalid','unused',0)")
+        con.execute("INSERT INTO telegram_users VALUES('777000','u1','Следователь','detective',0)")
+        con.execute('PRAGMA user_version=3')
+
+    db.init()
+
+    assert db.one('SELECT telegram_id,subject FROM telegram_users')=={
+        'telegram_id':'777000',
+        'subject':'777000',
+    }
+    with db.connect() as con:
+        assert con.execute('PRAGMA user_version').fetchone()[0]==4
