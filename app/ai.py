@@ -84,7 +84,7 @@ class AI:
             model=config.TEXT_MODEL, instructions=instructions+'\nRequired output language for player-visible strings: '+({'ru':'Russian (русский)','en':'English'}.get(context.get('language') or context.get('settings',{}).get('language'), 'as specified in the brief'))+'.',
             input=[{'role':'user','content':content}], text_format=model_type,
             max_output_tokens=18000 if category=='blueprint' else 4000,
-            store=False),cache_key=cache_key)
+            store=True),cache_key=cache_key)
         if result.output_parsed is None:
             raise InvalidContent('Model refused or returned incomplete structured data')
         parsed=result.output_parsed.model_dump()

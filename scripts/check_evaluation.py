@@ -32,7 +32,7 @@ path=Path('data')/('evaluation-check-'+a.attempt+'.json')
 reports=[]
 for attempt_no in range(3):
     r=provider.responses.parse(model=config.TEXT_MODEL,instructions=EVALUATOR,
-        input=[{'role':'user','content':json.dumps(context,ensure_ascii=False)}],text_format=evaluation_schema(v['explanation'],v['evidence'],len(rubric)),max_output_tokens=6000,store=False)
+        input=[{'role':'user','content':json.dumps(context,ensure_ascii=False)}],text_format=evaluation_schema(v['explanation'],v['evidence'],len(rubric)),max_output_tokens=6000,store=True)
     assert r.output_parsed,'Missing structured result'
     raw=r.output_parsed.model_dump()
     reports.append({'model':config.TEXT_MODEL,'prompt_version':config.PROMPT_VERSION,'usage':r.usage.model_dump(),'draft':raw})
