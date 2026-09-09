@@ -1,4 +1,5 @@
 import asyncio
+import base64
 import contextlib
 import hashlib
 import hmac
@@ -10,11 +11,19 @@ import sqlite3
 import threading
 import time
 from contextlib import asynccontextmanager
+from urllib.parse import urlencode
+import httpx
+import jwt
+from jwt import PyJWKClient
 from fastapi import FastAPI, Request, HTTPException, Depends
-from fastapi.responses import FileResponse, JSONResponse
+from fastapi.responses import FileResponse, JSONResponse, RedirectResponse
 from fastapi.staticfiles import StaticFiles
 from . import config, db, world, worker
 from .models import Settings, AuthInput, CommandInput, NoteInput
+
+
+TELEGRAM_STATE_COOKIE = 'detective_telegram_state'
+TELEGRAM_VERIFIER_COOKIE = 'detective_telegram_verifier'
 
 
 def password_hash(password, salt=None):
@@ -22,11 +31,51 @@ def password_hash(password, salt=None):
     return salt+':'+hashlib.scrypt(password.encode(),salt=salt.encode(),n=16384,r=8,p=1).hex()
 
 
+def user_by_id(uid):
+    return db.one('''
+        SELECT users.*,telegram_users.telegram_id,telegram_users.name,telegram_users.username
+        FROM users LEFT JOIN telegram_users ON telegram_users.user_id=users.id
+        WHERE users.id=?
+    ''',(uid,))
+
+
 def authenticate(request:Request):
     token=request.cookies.get('detective_session','')
-    row=db.one('SELECT users.* FROM users JOIN sessions ON sessions.user_id=users.id WHERE sessions.token=? AND sessions.expires>?',(hashlib.sha256(token.encode()).hexdigest(),time.time()))
+    row=db.one('''
+        SELECT users.*,telegram_users.telegram_id,telegram_users.name,telegram_users.username
+        FROM users JOIN sessions ON sessions.user_id=users.id
+        LEFT JOIN telegram_users ON telegram_users.user_id=users.id
+        WHERE sessions.token=? AND sessions.expires>?
+    ''',(hashlib.sha256(token.encode()).hexdigest(),time.time()))
     if not row:raise HTTPException(401,'Войдите в аккаунт, чтобы продолжить.')
     return row
+
+
+def is_admin(user):
+    return user['email'] in config.ADMINS or bool(user.get('telegram_id') in config.TELEGRAM_ADMIN_IDS)
+
+
+def public_user(user):
+    telegram=bool(user.get('telegram_id'))
+    return {
+        'email':None if telegram else user['email'],
+        'name':user.get('name') or user['email'],
+        'username':user.get('username') or '',
+        'provider':'telegram' if telegram else 'email',
+        'admin':is_admin(user),
+    }
+
+
+def issue_session(uid):
+    token=secrets.token_urlsafe(32)
+    with db.transaction() as con:
+        con.execute('DELETE FROM sessions WHERE expires<?',(time.time(),))
+        con.execute('INSERT INTO sessions VALUES(?,?,?)',(hashlib.sha256(token.encode()).hexdigest(),uid,time.time()+86400*30))
+    return token
+
+
+def set_session_cookie(response,token):
+    response.set_cookie('detective_session',token,httponly=True,secure=config.PRODUCTION,samesite='strict',max_age=86400*30)
 
 
 def owned_case(cid,user):
@@ -48,7 +97,7 @@ def key(request):
 
 
 def admin(user=Depends(authenticate)):
-    if user['email'] not in config.ADMINS:raise HTTPException(403,'Требуется доступ администратора.')
+    if not is_admin(user):raise HTTPException(403,'Требуется доступ администратора.')
     return user
 
 
@@ -93,6 +142,128 @@ def health():
     return {'status':'ok','version':'0.1.0'}
 
 
+@app.get('/api/auth/providers')
+def auth_providers():
+    return {'telegram':bool(config.TELEGRAM_CLIENT_ID and config.TELEGRAM_CLIENT_SECRET)}
+
+
+def telegram_callback_url():
+    return config.ORIGIN+'/api/auth/telegram/callback'
+
+
+def clear_telegram_cookies(response):
+    response.delete_cookie(TELEGRAM_STATE_COOKIE,path='/api/auth/telegram')
+    response.delete_cookie(TELEGRAM_VERIFIER_COOKIE,path='/api/auth/telegram')
+
+
+def telegram_error(code):
+    response=RedirectResponse('/?telegram_error='+code+'#/login',status_code=303)
+    clear_telegram_cookies(response)
+    return response
+
+
+def exchange_telegram_code(code,verifier):
+    credentials=base64.b64encode(f'{config.TELEGRAM_CLIENT_ID}:{config.TELEGRAM_CLIENT_SECRET}'.encode()).decode()
+    response=httpx.post(
+        config.TELEGRAM_ISSUER+'/token',
+        data={
+            'grant_type':'authorization_code',
+            'code':code,
+            'redirect_uri':telegram_callback_url(),
+            'client_id':config.TELEGRAM_CLIENT_ID,
+            'code_verifier':verifier,
+        },
+        headers={'Authorization':'Basic '+credentials},
+        timeout=15,
+    )
+    response.raise_for_status()
+    token=response.json().get('id_token')
+    if not isinstance(token,str) or len(token)>20000:
+        raise ValueError('missing_id_token')
+    return token
+
+
+def verify_telegram_token(token):
+    jwks=PyJWKClient(config.TELEGRAM_ISSUER+'/.well-known/jwks.json',timeout=10)
+    signing_key=jwks.get_signing_key_from_jwt(token)
+    claims=jwt.decode(
+        token,
+        signing_key.key,
+        algorithms=['RS256'],
+        audience=config.TELEGRAM_CLIENT_ID,
+        issuer=config.TELEGRAM_ISSUER,
+        options={'require':['iss','aud','sub','iat','exp']},
+    )
+    telegram_id=str(claims['sub'])
+    if not re.fullmatch(r'[1-9][0-9]{0,24}',telegram_id):
+        raise ValueError('invalid_subject')
+    if claims.get('id') is not None and str(claims['id'])!=telegram_id:
+        raise ValueError('identity_mismatch')
+    return {
+        'telegram_id':telegram_id,
+        'name':str(claims.get('name') or claims.get('preferred_username') or 'Пользователь Telegram')[:200],
+        'username':str(claims.get('preferred_username') or '')[:64],
+    }
+
+
+@app.get('/api/auth/telegram/start')
+def telegram_start(request:Request):
+    if not config.TELEGRAM_CLIENT_ID or not config.TELEGRAM_CLIENT_SECRET:
+        raise HTTPException(503,'Вход через Telegram пока не настроен.')
+    if not db.rate_limit('telegram-auth:'+request.client.host,20,300):
+        raise HTTPException(429,'Слишком много попыток. Подождите несколько минут.')
+    state=secrets.token_urlsafe(32)
+    verifier=secrets.token_urlsafe(64)
+    challenge=base64.urlsafe_b64encode(hashlib.sha256(verifier.encode()).digest()).decode().rstrip('=')
+    query=urlencode({
+        'client_id':config.TELEGRAM_CLIENT_ID,
+        'redirect_uri':telegram_callback_url(),
+        'response_type':'code',
+        'scope':'openid profile',
+        'state':state,
+        'code_challenge':challenge,
+        'code_challenge_method':'S256',
+    })
+    response=RedirectResponse(config.TELEGRAM_ISSUER+'/auth?'+query,status_code=303)
+    cookie={'httponly':True,'secure':config.PRODUCTION,'samesite':'lax','max_age':600,'path':'/api/auth/telegram'}
+    response.set_cookie(TELEGRAM_STATE_COOKIE,state,**cookie)
+    response.set_cookie(TELEGRAM_VERIFIER_COOKIE,verifier,**cookie)
+    response.headers['Cache-Control']='no-store'
+    return response
+
+
+@app.get('/api/auth/telegram/callback')
+def telegram_callback(request:Request,state:str='',code:str='',error:str=''):
+    expected=request.cookies.get(TELEGRAM_STATE_COOKIE,'')
+    verifier=request.cookies.get(TELEGRAM_VERIFIER_COOKIE,'')
+    if not expected or not verifier or not state or not secrets.compare_digest(state,expected):
+        return telegram_error('state')
+    if error:
+        return telegram_error('cancelled')
+    if not code or len(code)>4096:
+        return telegram_error('response')
+    try:
+        identity=verify_telegram_token(exchange_telegram_code(code,verifier))
+        now=time.time()
+        with db.transaction() as con:
+            current=con.execute('SELECT user_id FROM telegram_users WHERE telegram_id=?',(identity['telegram_id'],)).fetchone()
+            if current:
+                uid=current['user_id']
+                con.execute('UPDATE telegram_users SET name=?,username=? WHERE telegram_id=?',(identity['name'],identity['username'],identity['telegram_id']))
+            else:
+                uid=db.uid()
+                email=f'telegram-{uid}@telegram.invalid'
+                con.execute('INSERT INTO users(id,email,password,created) VALUES(?,?,?,?)',(uid,email,password_hash(secrets.token_urlsafe(32)),now))
+                con.execute('INSERT INTO telegram_users(telegram_id,user_id,name,username,created) VALUES(?,?,?,?,?)',(identity['telegram_id'],uid,identity['name'],identity['username'],now))
+        token=issue_session(uid)
+    except (httpx.HTTPError,jwt.PyJWTError,ValueError,KeyError,sqlite3.DatabaseError):
+        return telegram_error('verification')
+    response=RedirectResponse('/#/library',status_code=303)
+    clear_telegram_cookies(response)
+    set_session_cookie(response,token)
+    return response
+
+
 @app.post('/api/auth/{action}')
 def auth(action:str,body:AuthInput,request:Request):
     if action not in ['register','login']:raise HTTPException(404)
@@ -102,7 +273,7 @@ def auth(action:str,body:AuthInput,request:Request):
     if action=='register':
         try:
             with db.transaction() as con:
-                uid=db.uid();con.execute('INSERT INTO users VALUES(?,?,?,?)',(uid,email,password_hash(body.password),time.time()))
+                uid=db.uid();con.execute('INSERT INTO users(id,email,password,created) VALUES(?,?,?,?)',(uid,email,password_hash(body.password),time.time()))
         except sqlite3.IntegrityError:raise HTTPException(409,'Не удалось создать аккаунт. Попробуйте войти.')
     else:
         user=db.one('SELECT * FROM users WHERE email=?',(email,))
@@ -110,12 +281,9 @@ def auth(action:str,body:AuthInput,request:Request):
         candidate=password_hash(body.password,salt)
         if not user or not hmac.compare_digest(candidate,user['password']):raise HTTPException(401,'Неверная почта или пароль.')
         uid=user['id']
-    token=secrets.token_urlsafe(32)
-    with db.transaction() as con:
-        con.execute('DELETE FROM sessions WHERE expires<?',(time.time(),))
-        con.execute('INSERT INTO sessions VALUES(?,?,?)',(hashlib.sha256(token.encode()).hexdigest(),uid,time.time()+86400*30))
-    response=JSONResponse({'email':email,'admin':email in config.ADMINS})
-    response.set_cookie('detective_session',token,httponly=True,secure=config.PRODUCTION,samesite='strict',max_age=86400*30)
+    token=issue_session(uid)
+    response=JSONResponse(public_user(user_by_id(uid)))
+    set_session_cookie(response,token)
     return response
 
 
@@ -128,7 +296,7 @@ def logout(request:Request):
 
 @app.get('/api/me')
 def me(user=Depends(authenticate)):
-    return {'email':user['email'],'admin':user['email'] in config.ADMINS}
+    return public_user(user)
 
 
 def case_summary(c):

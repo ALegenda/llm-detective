@@ -63,6 +63,7 @@ def init():
             raise RuntimeError('Database is newer than this application')
         con.executescript('''
         CREATE TABLE IF NOT EXISTS users(id TEXT PRIMARY KEY,email TEXT UNIQUE NOT NULL,password TEXT NOT NULL,created REAL NOT NULL);
+        CREATE TABLE IF NOT EXISTS telegram_users(telegram_id TEXT PRIMARY KEY,user_id TEXT UNIQUE NOT NULL REFERENCES users(id),name TEXT NOT NULL,username TEXT NOT NULL,created REAL NOT NULL);
         CREATE TABLE IF NOT EXISTS sessions(token TEXT PRIMARY KEY,user_id TEXT NOT NULL REFERENCES users(id),expires REAL NOT NULL);
         CREATE TABLE IF NOT EXISTS cases(id TEXT PRIMARY KEY,user_id TEXT NOT NULL REFERENCES users(id),request_key TEXT NOT NULL,request_hash TEXT NOT NULL,settings TEXT NOT NULL,status TEXT NOT NULL DEFAULT 'queued',blueprint TEXT,review TEXT,created REAL NOT NULL,updated REAL NOT NULL,UNIQUE(user_id,request_key));
         CREATE TABLE IF NOT EXISTS attempts(id TEXT PRIMARY KEY,case_id TEXT NOT NULL REFERENCES cases(id),user_id TEXT NOT NULL REFERENCES users(id),state TEXT NOT NULL,initial_state TEXT NOT NULL,version INTEGER NOT NULL DEFAULT 0,status TEXT NOT NULL DEFAULT 'active',verdict TEXT,created REAL NOT NULL,updated REAL NOT NULL);
@@ -80,7 +81,8 @@ def init():
         if 'cache_key' not in columns:
             con.execute('ALTER TABLE operations ADD COLUMN cache_key TEXT')
             con.execute('ALTER TABLE operations ADD COLUMN response TEXT')
-        con.execute('PRAGMA user_version=2')
+        # Version 3 adds Telegram identities without changing legacy email accounts.
+        con.execute('PRAGMA user_version=3')
 
 
 def enqueue(con, case_id, kind, payload, dedupe, priority=10, command_id=None):

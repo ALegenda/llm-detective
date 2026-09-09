@@ -21,13 +21,19 @@ ORIGIN = (
     or 'http://localhost:8080'
 ).rstrip('/')
 ADMINS = {x.strip().lower() for x in os.getenv('ADMIN_EMAILS', '').split(',') if x.strip()}
-SCHEMA_VERSION = 2
+TELEGRAM_CLIENT_ID = os.getenv('TELEGRAM_CLIENT_ID', '').strip()
+TELEGRAM_CLIENT_SECRET = os.getenv('TELEGRAM_CLIENT_SECRET', '').strip()
+TELEGRAM_ADMIN_IDS = {x.strip() for x in os.getenv('TELEGRAM_ADMIN_IDS', '').split(',') if x.strip()}
+TELEGRAM_ISSUER = 'https://oauth.telegram.org'
+SCHEMA_VERSION = 3
 PROMPT_VERSION = '2026-09-09.1'
 
 
 def preflight():
     if not os.getenv('OPENAI_API_KEY'):
         raise RuntimeError('OPENAI_API_KEY is required. No demo fallback is provided.')
+    if bool(TELEGRAM_CLIENT_ID) != bool(TELEGRAM_CLIENT_SECRET):
+        raise RuntimeError('TELEGRAM_CLIENT_ID and TELEGRAM_CLIENT_SECRET must be configured together.')
     if PRODUCTION and not ORIGIN.startswith('https://'):
         raise RuntimeError('Production requires an HTTPS APP_ORIGIN (or RENDER_EXTERNAL_URL).')
     DATA.mkdir(parents=True, exist_ok=True)

@@ -38,3 +38,9 @@ services:
         sync: false
       - key: ADMIN_EMAILS
         value: ""
+      - key: TELEGRAM_CLIENT_ID
+        sync: false
+      - key: TELEGRAM_CLIENT_SECRET
+        sync: false
+      - key: TELEGRAM_ADMIN_IDS
+        value: "231142381,255816094"

@@ -175,7 +175,7 @@ def test_schema_one_migration_keeps_existing_save(game):
     db.init()
     assert db.one('SELECT state FROM attempts WHERE id=?',('a1',))['state']==saved
     with db.transaction() as con:
-        assert con.execute('PRAGMA user_version').fetchone()[0]==2
+        assert con.execute('PRAGMA user_version').fetchone()[0]==3
         assert {'cache_key','response'} <= {r[1] for r in con.execute('PRAGMA table_info(operations)')}
 
 

@@ -50,8 +50,19 @@ ENV_FILE=/absolute/path/to/existing/.env .venv/bin/python -m uvicorn app.main:ap
 | `APP_ENV` | `development` или `production` |
 | `APP_ORIGIN` | Точный origin интерфейса; HTTPS обязателен в production |
 | `ADMIN_EMAILS` | Администраторы через запятую; без значения доступ никому не выдаётся |
+| `TELEGRAM_CLIENT_ID`, `TELEGRAM_CLIENT_SECRET` | Данные Web Login из BotFather; если оба значения заданы, на экране входа появляется Telegram |
+| `TELEGRAM_ADMIN_IDS` | Числовые Telegram ID администраторов через запятую |
 
 Административная страница `/\#/admin` показывает неудачные/зависшие операции, причины, повторы и фактическое потребление AI. Повышение бюджета — настройка оператора, не игровая покупка. Монетизации и имитации оплаты нет.
+
+## Вход через Telegram
+
+В [@BotFather](https://t.me/BotFather) создайте бота, откройте **Bot Settings → Login Widget** и добавьте разрешённые URL:
+
+- `https://llm-detective.onrender.com`
+- `https://llm-detective.onrender.com/api/auth/telegram/callback`
+
+Скопируйте выданные Client ID и Client Secret в одноимённые переменные окружения. Алгоритм подписи должен оставаться стандартным `RS256`. Первый подтверждённый вход автоматически создаёт аккаунт; последующие входы находят его по постоянному Telegram ID. Телефон и разрешение на сообщения ботом не запрашиваются.
 
 ## Проверки
 
@@ -92,7 +103,7 @@ Compose использует `.env`, постоянный volume для данн
 В корне репозитория есть Blueprint [`render.yaml`](render.yaml): Docker web-сервис, диск `/data` для SQLite и ассетов, health-check `/api/health`. Нужен платный инстанс (`starter` и выше) — на Free нет persistent disk, а без него база и картинки пропадут при редеплое.
 
 1. Откройте [Blueprint Deploy](https://dashboard.render.com/blueprints/new?repo=https://github.com/ALegenda/llm-detective) (или **New → Blueprint** и выберите этот репозиторий).
-2. Подтвердите сервис `llm-detective` и при запросе укажите `OPENAI_API_KEY`.
+2. Подтвердите сервис `llm-detective` и при запросе укажите `OPENAI_API_KEY`. Для Telegram-входа также укажите `TELEGRAM_CLIENT_ID` и `TELEGRAM_CLIENT_SECRET` из BotFather.
 3. После деплоя URL вида `https://….onrender.com` подставится сам (`RENDER_EXTERNAL_URL` → `APP_ORIGIN`). При своём домене задайте `APP_ORIGIN` вручную.
 4. По желанию задайте `ADMIN_EMAILS` (через запятую) для `/#/admin`.
 
