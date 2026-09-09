@@ -221,9 +221,11 @@ def test_generation_normalizes_missing_reverse_exit_without_retry(game,blueprint
     assert saved['status']=='done' and saved['repair_count']==0
 
 
-def test_generation_reuses_saved_draft_when_new_validator_can_normalize_it(game,blueprint):
+@pytest.mark.parametrize('invalid_room', [False, True])
+def test_generation_reuses_saved_draft_when_new_validator_can_normalize_it(game,blueprint,invalid_room):
     one_sided=copy.deepcopy(blueprint)
     one_sided['locations'][1]['exits']=[]
+    if invalid_room:one_sided['objects'][2]['location']='l_safe'
     j=queue_job('generate')
     db.save_checkpoint(j,{'draft':one_sided,'feedback':['Exits must exist and be reciprocal']})
     j=db.one('SELECT * FROM jobs WHERE id=?',(j['id'],))
@@ -235,10 +237,29 @@ def test_generation_reuses_saved_draft_when_new_validator_can_normalize_it(game,
             assert category=='case_review'
             garden=next(x for x in context['blueprint']['locations'] if x['id']=='l_garden')
             assert garden['exits']==['l_hall']
+            assert context['blueprint']['objects'][2]['location']=='l_hall'
             return {'accepted':True,'issues':[],'alternative_routes':['letter then view','view then letter'],'reasoning_quality':'fair'}
     ai=ControlledAI();worker.generate(j,ai)
     assert ai.calls==['case_review']
     assert db.one('SELECT status FROM jobs WHERE id=?',(j['id'],))['status']=='done'
+
+
+def test_structurally_valid_draft_still_rewrites_rejected_plot(game,blueprint):
+    j=queue_job('generate')
+    db.save_checkpoint(j,{'draft':blueprint,'feedback':['Essential testimony contradicts the timeline'],'needs_rewrite':True})
+    j=db.one('SELECT * FROM jobs WHERE id=?',(j['id'],))
+    class ControlledAI:
+        case=db.one('SELECT * FROM cases WHERE id=?',('c1',))
+        calls=[]
+        def structured(self,category,prompt,context,schema):
+            self.calls.append(category)
+            if category=='blueprint':
+                assert context['repair_feedback']==['Essential testimony contradicts the timeline']
+                assert context['previous_draft']==blueprint
+                return blueprint
+            return {'accepted':True,'issues':[],'alternative_routes':[],'reasoning_quality':'fair'}
+    ai=ControlledAI();worker.generate(j,ai)
+    assert ai.calls==['blueprint','case_review']
 
 
 def test_art_budget_cannot_consume_action_budget(client,monkeypatch):

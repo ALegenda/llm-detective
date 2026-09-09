@@ -161,6 +161,41 @@ def test_unambiguous_container_location_is_canonicalized(blueprint):
     assert blueprint['objects'][2]['location']=='o_desk'
 
 
+@pytest.mark.parametrize('room_alias', ['l_safe', '', 'o_desk'])
+def test_invalid_contained_room_uses_explicit_parent_chain(blueprint, room_alias):
+    blueprint['objects'][2]['location']=room_alias
+    normalized=validate_blueprint(blueprint)
+    assert normalized['objects'][2]['location']=='l_hall'
+    assert blueprint['objects'][2]['location']==room_alias
+
+
+def test_nested_room_repair_is_independent_of_object_order(blueprint):
+    blueprint['objects'].append(dict(blueprint['objects'][0],id='o_box',location='l_missing',container='o_desk',locked=False,key_id=''))
+    blueprint['objects'][2].update(location='l_safe',container='o_box')
+    for objects in [blueprint['objects'],list(reversed(blueprint['objects']))]:
+        normalized=validate_blueprint(blueprint | {'objects':objects})
+        assert all(o['location']=='l_hall' for o in normalized['objects'])
+
+
+def test_container_repair_rejects_conflicting_real_rooms(blueprint):
+    blueprint['objects'][2]['location']='l_garden'
+    with pytest.raises(ValueError,match='o_letter.location=l_garden conflicts.*o_desk'):
+        validate_blueprint(blueprint)
+
+
+def test_container_cycles_are_rejected_even_without_essential_contents(blueprint):
+    blueprint['objects'][1]['container']='o_window'
+    blueprint['objects'][3]['container']='o_key'
+    with pytest.raises(ValueError,match='Containment cycle: o_key -> o_window -> o_key'):
+        validate_blueprint(blueprint)
+
+
+def test_invalid_top_level_room_is_not_guessed(blueprint):
+    blueprint['objects'][0]['location']='l_safe'
+    with pytest.raises(ValueError,match='Object o_desk location must be a location id'):
+        validate_blueprint(blueprint)
+
+
 def test_room_id_in_check_reports_exact_repair(blueprint):
     blueprint['checks'][0]['object_id']='l_hall'
     with pytest.raises(ValueError, match=r"f_lock.object_id.*l_hall.*o_desk"):

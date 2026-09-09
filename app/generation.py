@@ -18,17 +18,24 @@ def validate_blueprint(raw):
     errors = []
     loc = {x['id']: x for x in b['locations']}
     objects = {x['id']: x for x in b['objects']}
-    # Canonicalize a provider's unambiguous containment shorthand: location=container.
-    # The actual room remains defined by the parent; no case fact is invented.
+    # A contained object's room is defined by its outermost container. Recover
+    # invalid room aliases from that explicit chain, never from similar names.
+    # Conflicting real rooms and containment cycles still require a rewrite.
     for o in objects.values():
-        if o['location'] == o['container'] and o['container'] in objects:
-            parent = objects[o['container']]
-            visited = {o['id']}
-            while parent['location'] in objects and parent['id'] not in visited:
-                visited.add(parent['id'])
-                parent = objects[parent['location']]
-            if parent['location'] in loc:
-                o['location'] = parent['location']
+        parent = o
+        chain = [o['id']]
+        while parent['container'] in objects:
+            parent = objects[parent['container']]
+            if parent['id'] in chain:
+                errors.append('Containment cycle: ' + ' -> '.join(chain + [parent['id']]))
+                break
+            chain.append(parent['id'])
+        else:
+            if len(chain) > 1 and not parent['container'] and parent['location'] in loc:
+                if o['location'] not in loc:
+                    o['location'] = parent['location']
+                elif o['location'] != parent['location']:
+                    errors.append(f"Object {o['id']}.location={o['location']} conflicts with outer container {parent['id']}.location={parent['location']}; contained objects must share their container's room")
     checks = {x['id']: x for x in b['checks']}
     people = {x['id']: x for x in b['people']}
     accounts = {a['id']: a for n in b['people'] for a in n['accounts']}
