@@ -97,10 +97,23 @@ class Truth(Model):
     criteria: list[Criterion]
 
 
+class BriefingPerson(Model):
+    person_id: str
+    status: Literal['witness','person_of_interest','contact']
+    context: str = Field(description='Public reason this person is relevant or worth speaking to. No hidden guilt, secrets or private knowledge.')
+
+
+class CaseBriefing(Model):
+    objective: str = Field(description='Specific assignment: what incident and unanswered questions the investigator must resolve, without naming the solution.')
+    known_facts: list[str] = Field(min_length=2, max_length=6, description='Concrete facts publicly established before the player arrives: victim or missing item, place, discovery time and known circumstances. No deductions or undiscovered clues.')
+    participants: list[BriefingPerson] = Field(min_length=1, max_length=8)
+
+
 class Blueprint(Model):
     title: str
     subtitle: str
     introduction: str
+    briefing: CaseBriefing | None = None
     setting_rules: str
     visual_style: str
     start_location: str
@@ -195,7 +208,7 @@ class AuthInput(Model):
 
 class CommandInput(Model):
     text: str = Field(default='', max_length=3000)
-    kind: Literal['action','finish','hint'] = 'action'
+    kind: Literal['action','talk','finish','hint'] = 'action'
     target: str = ''
     evidence: list[str] = Field(default_factory=list, max_length=30)
     suspect: str = ''

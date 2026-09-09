@@ -12,7 +12,7 @@ for path in [Path(os.getenv('ENV_FILE', ROOT / '.env'))]:
 DATA = Path(os.getenv('DATA_DIR', ROOT / 'data')).resolve()
 DB_PATH = DATA / 'detective.sqlite3'
 TEXT_MODEL = os.getenv('OPENAI_TEXT_MODEL', 'gpt-5.4-mini')
-IMAGE_MODEL = os.getenv('OPENAI_IMAGE_MODEL', 'gpt-image-1.5')
+IMAGE_MODEL = os.getenv('OPENAI_IMAGE_MODEL', 'gpt-image-2.5-flare')
 PRODUCTION = os.getenv('APP_ENV') == 'production'
 # Render sets RENDER_EXTERNAL_URL (https://….onrender.com); prefer explicit APP_ORIGIN.
 ORIGIN = (
@@ -22,7 +22,7 @@ ORIGIN = (
 ).rstrip('/')
 ADMINS = {x.strip().lower() for x in os.getenv('ADMIN_EMAILS', '').split(',') if x.strip()}
 SCHEMA_VERSION = 2
-PROMPT_VERSION = '2026-09-08.3'
+PROMPT_VERSION = '2026-09-09.1'
 
 
 def preflight():

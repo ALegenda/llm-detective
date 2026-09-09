@@ -259,3 +259,22 @@ def test_legacy_authored_opening_check_has_persistent_effect(game):
     assert s['objects']['o_desk']['open']
     normalized=validate_blueprint(b)
     assert normalized['checks'][0]['opens_object']
+
+
+def test_briefing_introduces_only_publicly_named_people(blueprint):
+    blueprint['briefing']={'objective':'Выяснить, куда исчезло письмо.','known_facts':['Письмо не найдено.','Следователь начинает в кабинете.'],'participants':[{'person_id':'n_lev','status':'witness','context':'Работал в саду в день исчезновения.'}]}
+    b=validate_blueprint(blueprint);s=world.initial(b);world.observe_people(b,s)
+    public=world.public_world(b,s)
+    lev=next(n for n in public['people'] if n['id']=='n_lev')
+    assert not lev['here'] and lev['last_seen']['location']==''
+    briefing=world.public_briefing(b)
+    assert briefing['participants'][0]['context']=='Работал в саду в день исчезновения.'
+    assert 'knowledge' not in json.dumps(briefing) and 'culprits' not in json.dumps(briefing)
+    assert s['minute']==0 and s['evidence']==[]
+
+
+@pytest.mark.parametrize('ids', [['n_missing'],['n_ira','n_ira']])
+def test_briefing_references_must_be_real_and_unique(blueprint,ids):
+    blueprint['briefing']={'objective':'Найти письмо.','known_facts':['Письмо пропало.','Следователь в кабинете.'],'participants':[{'person_id':pid,'status':'contact','context':'Участник дела.'} for pid in ids]}
+    with pytest.raises(ValueError,match='Briefing participants'):
+        validate_blueprint(blueprint)

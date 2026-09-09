@@ -323,3 +323,48 @@ def test_finish_pipeline_persists_rubric_grounded_verdict(client,game):
     assert finished['world']['minute']==0 and finished['version']==1
     assert len(finished['verdict']['evaluation']['criteria'])==4
     assert finished['verdict']['truth']==b['truth']
+
+
+def test_chat_message_is_speech_not_a_physical_action(client,game):
+    text='Я беру ключ и ухожу в сад. Что вы знаете о письме?'
+    body={'kind':'talk','target':'n_ira','text':text,'version':0}
+    response=client.post('/api/attempts/a1/commands',json=body,headers={'Idempotency-Key':'chat-explicit-1'})
+    assert response.status_code==202
+    job=db.claim()
+    class ControlledAI:
+        case=db.one('SELECT * FROM cases WHERE id=?',('c1',))
+        calls=[]
+        def structured(self,category,prompt,context,schema):
+            self.calls.append(category)
+            assert category!='interpret'
+            if category=='dialogue':
+                assert context['request']==text
+                assert context['person']['id']=='n_ira'
+                return {'reply':'Я была в саду в шесть.','account_ids':['s_time'],'emotion':'calm','attitude':'neutral'}
+            return {'grounded':True,'reason':'Matches authored account'}
+    ai=ControlledAI();worker.command_job(job,ai)
+    saved=client.get('/api/attempts/a1').json()
+    assert ai.calls==['dialogue','dialogue_audit']
+    assert saved['world']['inventory']==[]
+    assert saved['world']['location']=='l_hall'
+    assert saved['world']['minute']==2
+    assert saved['world']['dialogue'][0]['player']==text
+    assert saved['world']['dialogue'][0]['person']=='n_ira'
+    assert client.post('/api/attempts/a1/commands',json=body,headers={'Idempotency-Key':'chat-explicit-1'}).json()['id']==response.json()['id']
+    assert len(client.get('/api/attempts/a1').json()['world']['dialogue'])==1
+
+
+@pytest.mark.parametrize('target', ['n_lev','n_missing',''])
+def test_chat_requires_present_person(client,target):
+    response=client.post('/api/attempts/a1/commands',json={'kind':'talk','target':target,'text':'Добрый вечер','version':0},headers={'Idempotency-Key':'absent-chat'})
+    assert response.status_code==422
+    assert not db.all_rows('SELECT * FROM commands')
+
+
+def test_old_case_has_public_briefing_without_hidden_solution(client):
+    briefing=client.get('/api/attempts/a1').json()['briefing']
+    assert briefing['introduction']=='Письмо пропало. Исследуйте кабинет.'
+    assert briefing['objective']
+    assert [n['id'] for n in briefing['participants']]==['n_ira']
+    public=json.dumps(briefing,ensure_ascii=False)
+    assert 'Она перенесла' not in public and 'Лжёт' not in public and 'редкий цветок' not in public

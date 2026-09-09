@@ -19,6 +19,8 @@ def index(b, group):
 
 
 def observe_people(b, s):
+    for participant in (b.get('briefing') or {}).get('participants',[]):
+        s['known_people'].setdefault(participant['person_id'],{'location':'','minute':0,'from_briefing':True})
     for n in b['people']:
         ns=s['people'][n['id']]
         if ns['location']==s['location'] and not ns['departed']:
@@ -68,6 +70,19 @@ def public_world(b, s):
     return {'minute':s['minute'],'location':s['location'],'inventory':s['inventory'],'objects':objects,'people':people,
         'locations':[{k:l[k] for k in ['id','name','description','exits','travel_minutes']} for l in b['locations']],
         'evidence':s['evidence'],'notes':s['notes'],'dialogue':s['dialogue'],'visited':s['visited'],'consequences':s['consequences'],'hints':s['hints']}
+
+
+def public_briefing(b, language='ru'):
+    """Opening information only; never derive a briefing from hidden truth."""
+    briefing=b.get('briefing') or {}
+    people=index(b,'people')
+    participants=briefing.get('participants') or [
+        {'person_id':n['id'],'status':'contact','context':''}
+        for n in b['people'] if n['location']==b['start_location']]
+    return {'introduction':b['introduction'],
+        'objective':briefing.get('objective') or ('Восстановите обстоятельства происшествия, выясните причастных, способ и мотив. Обоснуйте свою версию наблюдениями и показаниями.' if language=='ru' else 'Reconstruct the incident, identify those responsible, and explain the method and motive using observations and testimony.'),
+        'known_facts':briefing.get('known_facts',[]),
+        'participants':[{'id':p['person_id'],'name':people[p['person_id']]['name'],'role':people[p['person_id']]['role'],'status':p['status'],'context':p['context']} for p in participants if p['person_id'] in people]}
 
 
 def interpreter_context(b, s, payload):

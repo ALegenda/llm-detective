@@ -214,7 +214,7 @@ def attempt_details(aid:str,user=Depends(authenticate)):
             asset_jobs.append({'id':j['id'],'kind':p['kind'],'entity_id':p['entity'],'variant':p['variant'],'status':j['status']})
     failed=db.one("SELECT commands.id,commands.result,jobs.id AS job_id FROM commands JOIN jobs ON jobs.command_id=commands.id WHERE attempt_id=? AND commands.status='failed' AND expected_version=? ORDER BY commands.created DESC LIMIT 1",(aid,a['version']))
     return {'asset_jobs':asset_jobs,'failed_command':{'id':failed['id'],'job_id':failed['job_id'],'result':json.loads(failed['result'])} if failed else None,'id':a['id'],'case_id':c['id'],'title':b['title'],'introduction':b['introduction'],'start_time':b['start_time'],'setting_rules':b['setting_rules'],'language':json.loads(c['settings'])['language'],
-        'version':a['version'],'status':a['status'],'world':world.public_world(b,s),'assets':assets,'pending':pending,
+        'version':a['version'],'status':a['status'],'world':world.public_world(b,s),'briefing':world.public_briefing(b,json.loads(c['settings'])['language']),'assets':assets,'pending':pending,
         'events':[json.loads(e['public'])|{'minute':e['minute'],'event_id':e['id']} for e in db.all_rows('SELECT id,public,minute FROM events WHERE attempt_id=? ORDER BY id',(aid,))],
         'verdict':json.loads(a['verdict']) if a['verdict'] else None,
         'spoiled':bool(db.one("SELECT id FROM attempts WHERE case_id=? AND status='finished' AND id!=?",(c['id'],aid)))}
@@ -233,7 +233,11 @@ def command(aid:str,body:CommandInput,request:Request,user=Depends(authenticate)
         if current['status']!='active':raise HTTPException(409,'Эта попытка завершена.')
         if con.execute("SELECT id FROM commands WHERE attempt_id=? AND status IN ('queued','running')",(aid,)).fetchone():raise HTTPException(409,'Предыдущее действие ещё выполняется.')
         if body.kind=='finish' and (not body.confirmed or len(body.text.strip())<20):raise HTTPException(422,'Подтвердите раскрытие решения и опишите свою версию.')
-        if body.kind=='action' and not body.text.strip():raise HTTPException(422,'Опишите действие или задайте вопрос.')
+        if body.kind in ['action','talk'] and not body.text.strip():raise HTTPException(422,'Опишите действие или задайте вопрос.')
+        if body.kind=='talk':
+            state=json.loads(current['state']);person=state['people'].get(body.target)
+            if not person or person['departed'] or person['location']!=state['location']:
+                raise HTTPException(422,'Собеседника сейчас нет рядом. Найдите его, чтобы продолжить разговор.')
         try:(world.cited_evidence if body.kind=='finish' else world.accessible_evidence)(json.loads(current['state']),body.evidence)
         except ValueError as e:raise HTTPException(422,str(e))
         cid=db.uid()

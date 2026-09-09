@@ -53,7 +53,7 @@ def generate(job, ai):
     review=checkpoint.get('review')
     if not review:
         review=ai.structured('case_review',
-            'Audit this fixed detective case for concrete blocking defects. Do not reject merely for a possible preferred plot or stylistic improvement. Historical times can be inferred from authored statements and material records. Two sources may establish a causal conclusion jointly. Reject actual contradictions, impossible mechanics or unavailable essential support. Check: causal consistency, theme adherence, non-spoiler introduction and art, isolated NPC knowledge, actual independent evidence routes, reachable prerequisites, fair warning before loss, and difficulty as reasoning depth. Accept only if playable. Return specific actionable issues on failure and describe 2 concrete evidence routes. Approval is an expert review, not proof of universal solvability.',
+            'Audit this fixed detective case for concrete blocking defects. Do not reject merely for a possible preferred plot or stylistic improvement. Historical times can be inferred from authored statements and material records. Two sources may establish a causal conclusion jointly. Reject actual contradictions, impossible mechanics or unavailable essential support. Check: causal consistency, theme adherence, non-spoiler introduction and art, a concrete public briefing that explains the incident and assignment and introduces relevant people without leaking private knowledge, isolated NPC knowledge, actual independent evidence routes, reachable prerequisites, fair warning before loss, and difficulty as reasoning depth. Accept only if playable. Return specific actionable issues on failure and describe 2 concrete evidence routes. Approval is an expert review, not proof of universal solvability.',
             {'blueprint':b,'settings':settings},Review)
         db.save_checkpoint(job,{'blueprint':b,'review':review})
     if not review['accepted']:
@@ -152,6 +152,10 @@ def prepare_command(job,ai):
         return {'state':s,'result':{'messages':[b['hints'][pos] if b['hints'] else 'Сопоставьте независимые наблюдения с показаниями.'],'minutes':0},'mutations':[]}
     world.accessible_evidence(s,payload['evidence'])
     interpretation=checkpoint.get('interpretation')
+    if not interpretation and payload['kind']=='talk':
+        # Chat is explicitly addressed speech, never a physical action guessed
+        # from the wording of a player's message.
+        interpretation={'steps':[{'kind':'talk','target':payload['target'],'check_id':'','destination':'','topic':payload['text'],'minutes':0,'explanation':''}]}
     if not interpretation:
         interpretation=ai.structured('interpret',INTERPRETER,world.interpreter_context(b,s,payload)|{'language':settings['language']},Interpretation)
         db.save_checkpoint(job,{'interpretation':interpretation})

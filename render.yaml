@@ -32,7 +32,7 @@ services:
       - key: OPENAI_TEXT_MODEL
         value: gpt-5.4-mini
       - key: OPENAI_IMAGE_MODEL
-        value: gpt-image-1.5
+        value: gpt-image-2.5-flare
       # APP_ORIGIN is optional: app/config.py uses Render's RENDER_EXTERNAL_URL.
       - key: OPENAI_API_KEY
         sync: false
