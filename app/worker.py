@@ -197,6 +197,8 @@ def prepare_command(job,ai):
         return {'state':s,'result':{'messages':[b['hints'][pos] if b['hints'] else 'Сопоставьте независимые наблюдения с показаниями.'],'minutes':0},'mutations':[]}
     world.accessible_evidence(s,payload['evidence'])
     interpretation=checkpoint.get('interpretation')
+    if not interpretation and payload['kind']=='travel':
+        interpretation={'steps':[world.travel_step(b,s,payload)]}
     if not interpretation and payload['kind']=='object':
         interpretation={'steps':[world.object_step(b,s,payload)]}
     if not interpretation and payload['kind']=='talk':

@@ -225,7 +225,7 @@ class AuthInput(Model):
 
 class CommandInput(Model):
     text: str = Field(default='', max_length=3000)
-    kind: Literal['action','object','talk','finish','hint'] = 'action'
+    kind: Literal['action','object','travel','talk','finish','hint'] = 'action'
     target: str = ''
     object_action: Literal['','check','take','put','open','close'] = ''
     check_id: str = ''

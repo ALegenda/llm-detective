@@ -72,6 +72,13 @@ def available_checks(b,s,oid):
                  or index(b,'objects')[oid]['key_id'] in s['inventory'])]
 
 
+def travel_step(b,s,payload):
+    destination=payload['target']
+    if destination not in index(b,'locations')[s['location']]['exits']:
+        raise ValueError('Отсюда нет прямого прохода в выбранную локацию.')
+    return {'kind':'travel','target':'','destination':destination,'check_id':'','topic':'','minutes':0,'explanation':''}
+
+
 def object_step(b,s,payload):
     obj=index(b,'objects').get(payload['target'])
     action=payload.get('object_action')

@@ -143,7 +143,7 @@ async function route(){rememberDraft();window.scrollTo(0,0);clearTimeout(state.t
  if(action==='custom-object'){const name=el.dataset.name;closeModal();$('#action-text').value='Исследую '+name+': ';$('#action-text').focus();}
  if(action==='talk')go('/play/'+state.attempt.id+'/chat/'+el.dataset.id);
  if(action==='untarget')go('/play/'+state.attempt.id);
- if(action==='travel'){if(el.dataset.id===state.attempt.world.location)return;const l=state.attempt.world.locations.find(l=>l.id===el.dataset.id);await sendCommand({text:'Перехожу в локацию «'+l.name+'».',target:''});}
+ if(action==='travel'){if(el.dataset.id===state.attempt.world.location)return;const l=state.attempt.world.locations.find(l=>l.id===el.dataset.id);await sendCommand({kind:'travel',text:'Перехожу в локацию «'+l.name+'».',target:l.id});}
  if(action==='evidence-filter'){state.evidenceFilter=el.dataset.value;$('.journal-entries').innerHTML=journalEntries();$('.journal-tools').outerHTML=journalTools();}
  if(action==='journal'){const d=saveDraft();state.journal=el.dataset.value;renderPlay(state.attempt);restoreDraft(d);}
  if(action==='intro')go('/play/'+state.attempt.id+'/briefing');

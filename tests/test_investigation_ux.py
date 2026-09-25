@@ -8,6 +8,21 @@ from conftest import step
 P={'text':'Проверяю','evidence':[]}
 
 
+def test_travel_button_works_without_ai_and_rejects_unreachable_destination(client):
+    for destination in ['l_missing','l_hall']:
+        r=client.post('/api/attempts/a1/commands',json={'kind':'travel','target':destination,'version':0},headers={'Idempotency-Key':'travel-'+destination})
+        assert r.status_code==422
+    r=client.post('/api/attempts/a1/commands',json={'kind':'travel','target':'l_garden','version':0},headers={'Idempotency-Key':'travel-garden'})
+    assert r.status_code==202
+    class NoAI:
+        case=db.one('SELECT * FROM cases WHERE id=?',('c1',))
+        def structured(self,*args):raise AssertionError('Travel must remain possible without AI budget')
+    worker.command_job(db.claim(),NoAI())
+    saved=client.get('/api/attempts/a1').json()
+    assert saved['world']['location']=='l_garden'
+    assert saved['world']['minute']==3
+
+
 def test_object_button_bypasses_interpreter_and_preserves_idempotency(client,game):
     body={'kind':'object','object_action':'take','target':'o_key','text':'Беру ключ','version':0}
     r=client.post('/api/attempts/a1/commands',json=body,headers={'Idempotency-Key':'take-object-1'})
