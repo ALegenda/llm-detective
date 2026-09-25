@@ -70,6 +70,32 @@ def test_repeated_checks_and_open_close_do_not_waste_time(game):
     assert result['minutes']==0
 
 
+def test_visible_tool_preparation_explains_pickup_without_unlocking_check(game):
+    b,s=game
+    c=b['checks'][0];c['requires_tools']=['o_key']
+    before=copy.deepcopy(s)
+    obj=next(o for o in world.public_world(b,s)['objects'] if o['id']=='o_desk')
+    assert obj['preparation']==[{'label':c['intent'],'tools':[{'id':'o_key','name':world.index(b,'objects')['o_key']['name']}]}]
+    assert obj['checks']==[] and s==before
+    assert c['result'] not in json.dumps(obj,ensure_ascii=False)
+    with pytest.raises(ValueError):
+        world.object_step(b,s,{'target':'o_desk','object_action':'check','check_id':c['id']})
+    s,_,_=world.reduce(b,s,[step('take','o_key')],P)
+    obj=next(o for o in world.public_world(b,s)['objects'] if o['id']=='o_desk')
+    assert obj['preparation']==[] and obj['checks'][0]['id']==c['id']
+
+
+@pytest.mark.parametrize('gate',['unknown_fact','hidden_tool','closed_container','already_recorded'])
+def test_preparation_never_exposes_unready_or_completed_checks(game,gate):
+    b,s=game
+    c=b['checks'][0];c['requires_tools']=['o_key']
+    if gate=='unknown_fact':c['requires_facts']=['f_unknown']
+    elif gate=='hidden_tool':s['objects']['o_key']['visible']=False
+    elif gate=='closed_container':s['objects']['o_key']['container']='o_desk'
+    else:s['evidence']=[{'id':c['id']}]
+    assert world.check_preparation(b,s,'o_desk')==[]
+
+
 def test_notebook_keeps_only_relevant_exact_excerpts_and_no_smalltalk(game):
     b,s=game
     reply='Здравствуйте. Я была в саду в шесть. Устала сегодня.'

@@ -72,6 +72,22 @@ def available_checks(b,s,oid):
                  or index(b,'objects')[oid]['key_id'] in s['inventory'])]
 
 
+def check_preparation(b,s,oid):
+    """Explain a missing pickup only after every other access gate is met."""
+    objects=index(b,'objects');known={e['id'] for e in s['evidence']}
+    preparations=[]
+    for c in b['checks']:
+        if c['object_id']!=oid or (c['id'] in known and not check_changes_state(c,s)):
+            continue
+        missing=[tid for tid in c['requires_tools'] if tid not in s['inventory']]
+        if not missing or not all(tid in objects and objects[tid]['portable'] and visible(objects[tid],s) for tid in missing):
+            continue
+        prepared=s|{'inventory':s['inventory']+missing}
+        if c['id'] in {ready['id'] for ready in available_checks(b,prepared,oid)}:
+            preparations.append({'label':c['intent'],'tools':[{'id':tid,'name':objects[tid]['name']} for tid in missing]})
+    return preparations
+
+
 def travel_step(b,s,payload):
     destination=payload['target']
     if destination not in index(b,'locations')[s['location']]['exits']:
@@ -95,7 +111,7 @@ def public_world(b, s):
     for o in b['objects']:
         if visible(o,s):
             os=s['objects'][o['id']]
-            objects.append({k:o[k] for k in ['id','name','surface','portable']} | {k:os[k] for k in ['open','locked','container']} | {'location':effective_location(o['id'],s),'openable':openable(b,o),'position':os.get('position',''), 'checks':available_checks(b,s,o['id'])})
+            objects.append({k:o[k] for k in ['id','name','surface','portable']} | {k:os[k] for k in ['open','locked','container']} | {'location':effective_location(o['id'],s),'openable':openable(b,o),'position':os.get('position',''), 'checks':available_checks(b,s,o['id']), 'preparation':check_preparation(b,s,o['id'])})
     people=[]
     for n in b['people']:
         ns=s['people'][n['id']]
