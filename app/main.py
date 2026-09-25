@@ -337,7 +337,7 @@ def case_details(cid:str,user=Depends(authenticate)):
     c=owned_case(cid,user);result=case_summary(c)
     job=db.one("SELECT status,error_code,checkpoint FROM jobs WHERE case_id=? AND kind='generate'",(cid,))
     cp=json.loads(job['checkpoint']) if job and job['checkpoint'] else {}
-    result['stage']='ready' if c['status']=='ready' else (cp.get('stage','outline') if cp.get('pipeline_version')==2 else ('review' if 'blueprint' in cp else 'writing'))
+    result['stage']='ready' if c['status']=='ready' else (cp.get('stage','outline') if cp.get('pipeline_version',1)>=2 else ('review' if 'blueprint' in cp else 'writing'))
     if result['stage']=='reader':result['stage']='reading'
     if result['stage']=='adjudication':result['stage']='audit'
     result['generation_version']=cp.get('pipeline_version',1)

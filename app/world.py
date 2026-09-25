@@ -344,7 +344,7 @@ def reduce(b, old, steps, payload, speeches=None):
             for aid in speech['account_ids']:
                 a=allowed[aid]
                 excerpt=next((x['quote'] for x in speech.get('excerpts',[]) if x['account_id']==aid),speech['reply'])
-                add_evidence(s,aid,a['topic'],excerpt,'statement',npc['name'])
+                add_evidence(s,aid,'Ответ: '+payload['text'][:70] if payload['text'] else a['topic'],excerpt,'statement',npc['name'])
                 trigger(b,s,'question',aid,messages)
             if not speech['account_ids'] and speech.get('grounded') and speech.get('recordable',False):
                 add_evidence(s,'s_live_'+db.digest([target,speech['reply']])[:16],'Ответ: '+payload['text'][:70],speech['reply'],'statement',npc['name'])

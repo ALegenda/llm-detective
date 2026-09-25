@@ -13,7 +13,7 @@ from .ai import InvalidContent
 from .models import Model, Location, Thing, Check, Account, Blueprint
 from .generation import validate_blueprint
 
-VERSION = 2
+VERSION = 3
 
 class Place(Model):
     name: str
@@ -38,10 +38,11 @@ class Clue(Model):
     source_image_prompt: str
     location_index: int = Field(ge=0, le=4)
     portable: bool
-    action: str
+    source_kind: Literal['artifact','document','trace','fixture']
+    method: Literal['inspect','read','compare','experiment']
+    focus: str = Field(description='A short noun phrase naming the visible feature being investigated, never an action or hidden conclusion.')
     observation: str
     significance: str
-    is_missing_item: bool
 
 class Conclusion(Model):
     description: str
@@ -54,6 +55,8 @@ class MysteryOutline(Model):
     visual_style: str
     start_time: str
     public_incident: str
+    missing_item_name: str
+    missing_item_clue_index: int | None = Field(ge=0, le=15)
     event: str
     culprit_indices: list[int] = Field(min_length=1, max_length=3)
     method: str
@@ -67,21 +70,29 @@ class MysteryOutline(Model):
     clues: list[Clue] = Field(min_length=7, max_length=16)
     conclusions: list[Conclusion] = Field(min_length=3, max_length=5)
 
-class AccessRecipe(Model):
-    access: Literal['exposed', 'container', 'locked_container']
-    container_name: str
-    container_surface: str
-    container_image_prompt: str
+class ContainerRecipe(Model):
+    name: str
+    surface: str
+    image_prompt: str
+    location: str
+    parent_index: int | None = Field(ge=0, le=2)
+    locked: bool
     key_name: str
     key_surface: str
     key_image_prompt: str
     key_location: str
+
+class AccessRecipe(Model):
+    container_index: int | None = Field(ge=0, le=2)
     tool_name: str
     tool_surface: str
     tool_image_prompt: str
     tool_location: str
     requires: list[str]
     minutes: int = Field(ge=1, le=10)
+
+class ObservationText(Model):
+    result: str
 
 class ScriptAccount(Model):
     topic: str
@@ -124,17 +135,19 @@ class StoryAudit(Model):
     strengths: list[str]
 
 OUTLINE_PROMPT = '''Design a compelling fair mystery as CAUSES AND EVIDENCE, not game code. Follow the user's theme materially: local geography/history/occupation must affect method and evidence. All player-facing text in settings.language. Short: 3 places, 3 people, 7-9 clues; standard: 4/4/10-12; long: 5/5/13-16. Place 0 is a hub connected to every other place; all places accessible from start. No other place-to-place direct exits. Cast stays available, no timed escape or mandatory confession. The player is a SEPARATE visiting investigator; never turn the player into an NPC or assign a cast member the role of the player leading this investigation.
-First establish a coherent past: who did what, how, when, why, and where any missing object is NOW. Then derive physical evidence from that past. Each clue has one DIFFERENT physical source: a document, trace, device, recovered object or material experiment. Clues have explicit readable times/names/physical details. observation contains ONLY what can actually be perceived/read/tested, not omniscient motives, route deductions or declaring guilt. significance is PRIVATE design reasoning. action is a concise natural investigation label, no hidden finding or solution spoilers. source_surface is exterior only, never hidden writing or current holder/location; source name/appearance must not reveal a hidden conclusion. Locations are present AFTER the incident. Missing object is a portable clue at its true CURRENT hiding place, marked is_missing_item; never in its supposedly empty old container. Recovery is allowed early and does not itself solve the case.
+First establish a coherent past: who did what, how, when, why, and where any missing object is NOW. Then derive physical evidence from that past. Each clue has one DIFFERENT physical source: a document, trace, device, recovered object or material experiment. Clues have explicit readable times/names/physical details. observation contains ONLY what can actually be perceived/read/tested, not omniscient motives, route deductions or declaring guilt. significance is PRIVATE design reasoning. method is inspect/read/compare/experiment. focus is a concise NOUN PHRASE about the visible feature, not an infinitive or hidden finding. The compiler supplies action verbs. A source is the ACTUAL document, artifact, trace or fixture being observed, never a container whose contents you merely describe. Containers are created separately by the world planner. Opening a pouch to find an artifact requires an ARTIFACT source wrapped in a pouch container, never a check pretending to open it. Each experiment needs a real portable instrument; each comparison needs two earlier observations. source_surface is exterior only, never hidden writing or current holder/location; source name/appearance must not reveal a hidden conclusion. Locations are present AFTER the incident. If something is missing, set missing_item_name to that actual object (e.g. bronze tablet, NOT its pouch/box) and missing_item_clue_index to the dedicated artifact clue. That clue source_name must equal missing_item_name, source_kind=artifact, portable=true. For no missing item use empty name and null index. Its location is the true CURRENT hiding place, never its supposedly empty old container. Recovery is allowed early and does not itself solve the case.
 Every conclusion (identity, causal method and evidenced motive, plus at most 2 necessary details) must have >=2 DISTINCT independent material sources. Use zero-based clue_indices. Motive must be inferable from available records/actions, never only private_context or confession. Every decisive assertion has a support route. An alternative suspect must have a plausible innocent secret that explains their misleading conduct. fair_reversal must be earned by evidence, not information withheld from the player. Avoid generic identical guilty/innocent templates. Difficulty controls inference depth, not keys or clue count. Include a meaningful experiment or comparison. Put prerequisite observations earlier than comparisons in clue order. Do not require consumable/destructive actions or unsupported physical effects: a check observes only; opening/taking are separate engine actions.
 Cast knowledge contains concrete personal memories and beliefs ONLY, no global omniscience; indicate dishonest beliefs/claims and what the person knows of them. appearance fixes gender and identity. public_incident explains the assignment without leaking private facts. If repairing, preserve valid facts and the causal truth; fix the specified source/contradiction, not the whole story. Never resubmit an unchanged rejected stage.'''
 
-WORLD_PROMPT = '''Fit the fixed outline to the provided safe engine recipes. Do NOT change the story, sources, locations or observations. Return one recipe per f_N field. exposed means the source is visible in its room. container places source inside a newly created, initially closed, unlocked container. locked_container additionally creates a portable key, initially visible in key_location, outside ALL containers. tool_name creates a portable tool initially visible at tool_location. Use tools only if the authored experiment physically needs one. Empty ALL unused container/key/tool strings; key_location/tool_location empty if unused. Give each created object a unique natural name. No offscreen NPC-held keys, gifts, invented passwords, concealed roots or custom effects. Choose at most 2 containers and at most 1 locked container for a short case. The source itself remains exactly as authored; do not wrap an architectural trace in a box. Container surface describes only exterior, not contents. Player opening always reveals the source immediately; choose access consistent with its actual hiding place. Missing item must not be in its ORIGINAL empty container.
-requires may ONLY reference earlier f_N observations offered by the schema, and only for an actual comparison. Ordinary reading needs no prior fact. Every room/key/tool is available from start; depth comes from deductions. minutes is actual investigation time. No check opens, moves, gives or changes objects; such mechanics are explicit player actions. Follow repair feedback with minimal changes to this stage.'''
+WORLD_PROMPT = '''Create a physically consistent access layout for the fixed outline using only supported recipes. Do not change the incident, sources, observation modes or locations. containers is a shared list of 0-3 actual openable containers. parent_index=null means visible in the room. A nested container may reference ONLY an EARLIER index; its room must equal its parent's room. Multiple sources can share the same container_index. Sources wrapped in nested containers become visible ONLY after the actual ancestors open. Empty container list is valid for sources in plain sight. Never duplicate an existing container under another name or expose a source which prose places inside a closed one.
+For every f_N give container_index=null if source is visibly exposed, otherwise the exact container index. Its container must be in the source's authored room. A missing artifact is a separate source inside its current hiding container, never represented by the pouch instead of the artifact. Do not put architectural traces inside boxes. Exterior marks can be standalone fixtures on a container.
+A locked container additionally creates a portable key initially visible in key_location OUTSIDE all containers. Use at most one lock for a short story. Empty key fields for unlocked containers. A tool_name creates a portable instrument visible in tool_location; empty all tool strings otherwise. An experiment MUST have its real instrument. A comparison MUST require at least two earlier f_N observations offered by the schema. Ordinary inspect/read must not require prior observations. Never put required objects in NPC possession or describe gifts: dialogue cannot transfer things. Each object name denotes one physical thing, with exterior-only surfaces. The compiler owns IDs, openings, discovery, taking and costs. Checks ONLY observe; no invented changes or remote measurements. Follow repair feedback with minimal corrections to this layout.'''
 
-SCRIPT_PROMPT = '''Write the player briefing and NPC testimony for the FIXED mystery and compiled world. Do not change causal truth, physical placements or evidence. Introduction: complete atmospheric 2-3 paragraphs stating concrete incident/discovery/time/assignment, no hidden culprit or undiscovered clues. objective identifies questions to solve; known_facts only public opening facts. Public participant context is concise THIRD-PERSON public briefing prose explaining relevance without guilt leakage; it is not a spoken NPC reply. Never put engine rules, availability of rooms, route topology, checks, IDs, evidence prerequisites or other implementation details into introduction/objective/known_facts. Describe real-world circumstances only.
+
+SCRIPT_PROMPT = '''Write the player briefing, NPC testimony and observation results for the FIXED mystery and compiled world. Each f_N.result describes what the player learns from that exact check in that exact scene. Preserve its intended material facts, but ground the wording in its compiled method, available tools and required earlier observations. Inspect sees exterior features; read quotes an existing record; compare uses the listed prior observations; experiment uses the actual provided tool. Never pretend the player visited another room, used unprovided equipment, opened/took/moved anything, or already knew an unrequired clue. A measurement needs the listed instrument unless it is merely quoted from a document. The artifact is already visible when its check is available: discovery happens through real container opening, not result prose. No omniscient deductions as observations. Do not change causal truth, physical placements or evidence. Introduction: complete atmospheric 2-3 paragraphs stating concrete incident/discovery/time/assignment, no hidden culprit or undiscovered clues. objective identifies questions to solve; known_facts only public opening facts. Public participant context is concise THIRD-PERSON public briefing prose explaining relevance without guilt leakage; it is not a spoken NPC reply. Never put engine rules, availability of rooms, route topology, checks, IDs, evidence prerequisites or other implementation details into introduction/objective/known_facts. Describe real-world circumstances only.
 Each NPC gets 3-5 concise topic accounts, direct first-person speech, grammatical gender from appearance, grounded in their own knowledge. Each claim answers its topic, not unrelated exposition. Innocent secrets and plausible lies have clear personal reasons. requires_evidence uses actual f_N ids only for secrets/confrontations; normal background/time/alibi must be discussable immediately. Testimony can guide/corroborate/lie; all necessary proof already has material routes. Talking NEVER transfers a key/item, opens anything, or changes physical state. Never claim such an effect. Hints: first broad direction, second comparison, final more concrete, none names culprit. Follow repair feedback with minimal corrections.'''
 
-AUDIT_PROMPT = '''Audit narrative consistency and fair inference, not engine mechanics. A real reducer replay certificate already proves the compiled access graph, item recovery and clue acquisition; do not demand extra locks, a delayed discovery, prescribed investigation order or a confession. Early recovery at the correct CURRENT hiding place is legal. The outline is authoritative past; compiled objects are actual present; opening exposes children immediately. NPC claims can intentionally lie, while objective observations cannot contradict truth. Check concrete contradictions between briefing/actual present/observation/truth; missing evidence for a required causal conclusion; omniscient NPC knowledge; premature culprit disclosure; or incomplete sentences. Compare independent_reader (which never saw truth) with intended answer: ambiguous identity/motive requires better observable support. Different wording or reasonable inference is fine. Do not reject for stylistic preference. Return only demonstrated blocking issues, with the responsible stage and exact source/person identifier plus a minimal correction. outline owns objective facts, sources and knowledge; world owns access/containers/tools; script owns briefing/accounts/hints. strengths briefly explains what makes this story interesting and theme-specific. Empty issues means publishable. Never label a source contradiction just because a lie conflicts with truth.'''
+AUDIT_PROMPT = '''Audit narrative consistency and fair inference, not engine mechanics. A real reducer replay certificate already proves the compiled access graph, item recovery and clue acquisition; do not demand extra locks, a delayed discovery, prescribed investigation order or a confession. Early recovery at the correct CURRENT hiding place is legal. The outline is authoritative past; compiled objects are actual present; opening exposes children immediately. NPC claims can intentionally lie, while objective observations cannot contradict truth. Check each observation against its observation_contract: an inspect/read cannot open/take or report an unperformed remote measurement; measurement must use its declared instrument or quote an actual readable record; source contents must be physically represented and discoverable. Check concrete contradictions between briefing/actual present/observation/truth; missing evidence for a required causal conclusion; omniscient NPC knowledge; premature culprit disclosure; or incomplete sentences. Compare independent_reader (which never saw truth) with intended answer: ambiguous identity/motive requires better observable support. Different wording or reasonable inference is fine. Do not reject for stylistic preference. Return only demonstrated blocking issues, with the responsible stage and exact source/person identifier plus a minimal correction. outline owns objective facts, sources and knowledge; world owns access/containers/tools; script owns briefing/accounts/hints. strengths briefly explains what makes this story interesting and theme-specific. Empty issues means publishable. Never label a source contradiction just because a lie conflicts with truth.'''
 
 
 def validate_outline(raw, settings):
@@ -147,13 +160,21 @@ def validate_outline(raw, settings):
     for group in ['cast','clues']:
         for i,item in enumerate(o[group]):
             if item['location_index']>=len(o['places']):errors.append(f'{group}[{i}].location_index outside places')
+    for i,c in enumerate(o['clues']):
+        if c['method']=='compare' and i<2:errors.append(f'clues[{i}] comparison must follow at least two source observations')
     names=[c['source_name'].strip().casefold() for c in o['clues']]
     if len(names)!=len(set(names)):errors.append('Each clue must use a distinct named material source')
     for i,c in enumerate(o['conclusions']):
         refs=c['clue_indices']
         if len(set(refs))<2 or any(j<0 or j>=len(o['clues']) for j in refs):errors.append(f'conclusions[{i}] needs >=2 distinct existing zero-based clue_indices')
-    for i,c in enumerate(o['clues']):
-        if c['is_missing_item'] and not c['portable']:errors.append(f'clues[{i}] missing item must be physically recoverable (portable)')
+    missing=o['missing_item_clue_index']
+    if o['missing_item_name']:
+        if missing is None or missing>=len(o['clues']):errors.append('missing_item_clue_index must identify the actual missing artifact')
+        else:
+            c=o['clues'][missing]
+            if c['source_name']!=o['missing_item_name'] or c['source_kind']!='artifact' or not c['portable']:
+                errors.append('Missing item must have its own portable artifact clue with source_name exactly matching missing_item_name, not its container')
+    elif missing is not None:errors.append('Missing item index requires missing_item_name')
     import re
     if not re.fullmatch(r'(?:[01]\d|2[0-3]):[0-5]\d',o['start_time']):errors.append('start_time must be HH:MM')
     if errors:raise ValueError('; '.join(errors))
@@ -162,11 +183,12 @@ def validate_outline(raw, settings):
 
 def world_schema(o):
     rooms=tuple(f'l_{i+1}' for i in range(len(o['places'])))
-    fields={}
+    container=create_model('ReachableContainer',__base__=ContainerRecipe,location=(Literal.__getitem__(rooms),...),key_location=(Literal.__getitem__(('',)+rooms),...))
+    fields={'containers':(list[container],Field(max_length=3))}
     for i in range(len(o['clues'])):
         prior=tuple(f'f_{j+1}' for j in range(i))
         recipe=create_model(f'AccessForClue{i+1}',__base__=AccessRecipe,
-            key_location=(Literal.__getitem__(('',)+rooms),...),tool_location=(Literal.__getitem__(('',)+rooms),...),
+            tool_location=(Literal.__getitem__(('',)+rooms),...),
             requires=(list[Literal.__getitem__(prior)] if prior else list[str],Field(**({} if prior else {'max_length':0}))))
         fields[f'f_{i+1}']=(recipe,...)
     return create_model('CompiledAccessPlan',__base__=Model,**fields)
@@ -176,32 +198,46 @@ def script_schema(o):
     evidence=tuple(f'f_{i+1}' for i in range(len(o['clues'])))
     account=create_model('GroundedScriptAccount',__base__=ScriptAccount,requires_evidence=(list[Literal.__getitem__(evidence)],...))
     character=create_model('GroundedCharacterScript',__base__=CharacterScript,accounts=(list[account],Field(min_length=3,max_length=5)))
-    return create_model('CaseScript',__base__=Script,**{f'n_{i+1}':(character,...) for i in range(len(o['cast']))})
+    return create_model('CaseScript',__base__=Script,**({f'n_{i+1}':(character,...) for i in range(len(o['cast']))}|{f'f_{i+1}':(ObservationText,...) for i in range(len(o['clues']))}))
 
 
-def compile_world(o, raw_plan, script=None):
+def compile_world(o, raw_plan, script=None, language='ru'):
     plan=world_schema(o).model_validate(raw_plan).model_dump()
     objects=[];checks=[]
     def thing(oid,name,surface,prompt,location,**kwargs):
         objects.append(Thing(id=oid,name=name,surface=surface,image_prompt=prompt,location=location,
             portable=False,movable=False,openable=False,visible=True,container='',locked=False,key_id='').model_dump()|kwargs)
+    containers=plan['containers']
+    for i,r in enumerate(containers):
+        parent='';key=''
+        if r['parent_index'] is not None:
+            if r['parent_index']>=i:raise ValueError(f'containers[{i}] may only be inside an earlier container')
+            if containers[r['parent_index']]['location']!=r['location']:raise ValueError(f'containers[{i}] room differs from its parent')
+            parent=f"o_box_{r['parent_index']+1}"
+        if r['locked']:
+            if not r['key_name'].strip() or not r['key_location']:raise ValueError(f'containers[{i}] needs a named reachable key')
+            key=f'o_key_{i+1}'
+            thing(key,r['key_name'],r['key_surface'],r['key_image_prompt'],r['key_location'],portable=True,movable=True)
+        thing(f'o_box_{i+1}',r['name'],r['surface'],r['image_prompt'],r['location'],container=parent,visible=not parent,openable=True,locked=r['locked'],key_id=key)
+    verbs={'inspect':'Осмотреть','read':'Прочитать','compare':'Сопоставить','experiment':'Провести проверку'} if language=='ru' else {'inspect':'Examine','read':'Read','compare':'Compare','experiment':'Test'}
     for i,c in enumerate(o['clues']):
         fid=f'f_{i+1}';oid=f'o_{i+1}';r=plan[fid];room=f"l_{c['location_index']+1}"
         parent='';tools=[]
-        if r['access']!='exposed':
-            if not r['container_name'].strip():raise ValueError(fid+' requires named container')
-            parent=f'o_box_{i+1}';key=''
-            if r['access']=='locked_container':
-                if not r['key_name'].strip() or not r['key_location']:raise ValueError(fid+' requires a named key and reachable key_location')
-                key=f'o_key_{i+1}'
-                thing(key,r['key_name'],r['key_surface'],r['key_image_prompt'],r['key_location'],portable=True,movable=True)
-            thing(parent,r['container_name'],r['container_surface'],r['container_image_prompt'],room,openable=True,locked=bool(key),key_id=key)
+        if r['container_index'] is not None:
+            ci=r['container_index']
+            if ci>=len(containers):raise ValueError(fid+' references a nonexistent container_index')
+            if containers[ci]['location']!=room:raise ValueError(fid+' source and container must be in the same room')
+            parent=f'o_box_{ci+1}'
+        if c['method']=='experiment' and not r['tool_name'].strip():raise ValueError(fid+' experiment needs its actual instrument')
+        if c['method']=='compare' and len(set(r['requires']))<2:raise ValueError(fid+' comparison needs at least two earlier observations')
+        if c['method'] in ['inspect','read'] and r['requires']:raise ValueError(fid+' ordinary inspection/reading must not depend on other observations')
         if r['tool_name'].strip():
             if not r['tool_location']:raise ValueError(fid+' needs tool_location')
             tool=f'o_tool_{i+1}';tools=[tool]
             thing(tool,r['tool_name'],r['tool_surface'],r['tool_image_prompt'],r['tool_location'],portable=True,movable=True)
         thing(oid,c['source_name'],c['source_surface'],c['source_image_prompt'],room,portable=c['portable'],movable=c['portable'],container=parent,visible=not parent)
-        checks.append(Check(id=fid,object_id=oid,intent=c['action'],result=c['observation'],requires_facts=r['requires'],requires_tools=tools,requires_open=parent,reveals_objects=[],minutes=r['minutes'],essential=True,opens_object=False).model_dump())
+        result=script[fid]['result'] if script else c['observation']
+        checks.append(Check(id=fid,object_id=oid,intent=verbs[c['method']]+': '+c['focus'],result=result,requires_facts=r['requires'],requires_tools=tools,requires_open=parent,reveals_objects=[],minutes=r['minutes'],essential=True,opens_object=False).model_dump())
     names=[x['name'].strip().casefold() for x in objects]
     if len(names)!=len(set(names)):raise ValueError('World recipe creates duplicate physical object names; use distinct containers, keys and tools')
     locations=[]
@@ -301,9 +337,9 @@ def build(job, ai, settings):
     try:outline=validate_outline(outline,settings)
     except ValueError as e:reject('outline',[str(e)])
     plan=stage_call('world','story_world',WORLD_PROMPT,{'outline':outline},world_schema(outline))
-    try:base=compile_world(outline,plan)
+    try:base=compile_world(outline,plan,language=settings['language'])
     except ValueError as e:reject('world',[str(e)])
-    required=[f'o_{i+1}' for i,c in enumerate(outline['clues']) if c['is_missing_item']]
+    required=[f"o_{outline['missing_item_clue_index']+1}"] if outline['missing_item_clue_index'] is not None else []
     if 'certificate' not in cp:
         try:cp['certificate']={'forward':exercise_world(base,required),'reverse':exercise_world(base,required,reverse=True)}
         except ValueError as e:reject('world',[str(e)])
@@ -311,12 +347,12 @@ def build(job, ai, settings):
     script=stage_call('script','story_script',SCRIPT_PROMPT,{'outline':outline,'compiled_world':base},script_schema(outline))
     try:
         script=script_schema(outline).model_validate(script).model_dump()
-        b=compile_world(outline,plan,script)
+        b=compile_world(outline,plan,script,language=settings['language'])
     except ValueError as e:reject('script',[str(e)])
     cp['blueprint']=b;save('reading')
     reader=stage_call('reader','story_reader','Solve this mystery from the player-obtainable MATERIAL evidence ONLY. You are a critical reader, not an author. No confession or private knowledge is supplied. Identify who/how/why with concrete cited material evidence. If several explanations fit equally well, state the ambiguity honestly. Do not invent unseen facts. All supplied physical observations have actually been acquired in a legal engine replay.',
         {'briefing':b['introduction'],'assignment':b['briefing'],'people':[{k:p[k] for k in ['id','name','role']} for p in b['people']], 'observations':[{'id':c['id'],'source':world.index(b,'objects')[c['object_id']]['name'],'text':c['result']} for c in b['checks']]},reader_schema(b))
-    audit=stage_call('audit','story_audit',AUDIT_PROMPT,{'outline':outline,'blueprint':b,'independent_reader':reader,'mechanical_proof':{'orders_tested':2,'all_material_clues_acquired':True,'required_items_recovered':True}},StoryAudit)
+    audit=stage_call('audit','story_audit',AUDIT_PROMPT,{'outline':outline,'blueprint':b,'independent_reader':reader,'observation_contracts':[{'check':c['id'],'source':world.index(b,'objects')[c['object_id']]['name'],'location':world.index(b,'objects')[c['object_id']]['location'],'method':outline['clues'][i]['method'],'tools':[world.index(b,'objects')[t]['name'] for t in c['requires_tools']],'prior_observations':c['requires_facts']} for i,c in enumerate(b['checks'])],'mechanical_proof':{'orders_tested':2,'all_material_clues_acquired':True,'required_items_recovered':True}},StoryAudit)
     issues=audit['issues']
     if issues:
         resolution_schema=create_model('VerifiedAuditIssues',__base__=AuditResolution,

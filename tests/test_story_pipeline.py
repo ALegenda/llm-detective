@@ -13,24 +13,29 @@ from test_reliability import queue_job
 def outline():
     return {
         'title':'Письмо перед отплытием','subtitle':'Портовая история','setting_rules':'Реализм','visual_style':'Editorial ink','start_time':'09:00',
-        'public_incident':'Исчезло письмо. Три свидетеля ждут в порту.', 'event':'Исчезновение письма', 'culprit_indices':[0],
+        'public_incident':'Исчезло письмо. Три свидетеля ждут в порту.', 'missing_item_name':'Источник 6','missing_item_clue_index':6, 'event':'Исчезновение письма', 'culprit_indices':[0],
         'method':'Письмо переложено в коробку','motive':'Скрыть перенос встречи','timeline':['08:00 письмо получено','08:10 встреча перенесена','08:20 письмо скрыто','08:30 обнаружена пропажа'],
         'explanation':'Ирина скрыла письмо с новым временем встречи.','dramatic_question':'Почему письмо исчезло?','fair_reversal':'Опоздание оказалось намеренным.',
         'places':[{'name':name,'description':name,'atmosphere':'Туман','image_prompt':'Empty architecture','travel_minutes':2} for name in ['Контора','Причал','Мастерская']],
         'cast':[{'name':name,'role':'Свидетель','appearance':'Взрослый человек','personality':'Сдержанный','interests':'Работа','location_index':i,'knowledge':['Встреча в 18:00.'],'innocent_secret':''} for i,name in enumerate(['Ирина','Лев','Анна'])],
-        'clues':[{'source_name':'Источник '+str(i),'source_surface':'Закрытый документ '+str(i),'source_image_prompt':'Closed paper','location_index':i%3,'portable':i==6,'action':'Прочитать источник '+str(i),'observation':'На документе '+str(i)+' указана встреча в 18:00.','significance':'Устанавливает время','is_missing_item':i==6} for i in range(7)],
+        'clues':[{'source_name':'Источник '+str(i),'source_surface':'Закрытый документ '+str(i),'source_image_prompt':'Closed paper','location_index':i%3,'portable':i==6,'source_kind':'artifact' if i==6 else 'document','method':'compare' if i==3 else 'read','focus':'запись '+str(i),'observation':'На документе '+str(i)+' указана встреча в 18:00.','significance':'Устанавливает время'} for i in range(7)],
         'conclusions':[{'description':'Критерий '+str(i),'clue_indices':[i,i+1]} for i in range(3)]}
 
 
 def recipe(**changes):
-    return {'access':'exposed','container_name':'','container_surface':'','container_image_prompt':'','key_name':'','key_surface':'','key_image_prompt':'','key_location':'','tool_name':'','tool_surface':'','tool_image_prompt':'','tool_location':'','requires':[],'minutes':2}|changes
+    return {'container_index':None,'tool_name':'','tool_surface':'','tool_image_prompt':'','tool_location':'','requires':[],'minutes':2}|changes
+
+
+def box(name,location,parent=None,locked=False):
+    return {'name':name,'surface':'Закрытая ёмкость','image_prompt':'Closed container','location':location,'parent_index':parent,'locked':locked,'key_name':name+' ключ' if locked else '', 'key_surface':'Ключ' if locked else '', 'key_image_prompt':'Key' if locked else '', 'key_location':'l_3' if locked else ''}
 
 
 def make_plan():
     plan={f'f_{i+1}':recipe() for i in range(7)}
-    plan['f_1']=recipe(access='locked_container',container_name='Сейф',container_surface='Стальной сейф',container_image_prompt='Closed safe',key_name='Ключ от сейфа',key_surface='Латунный ключ',key_image_prompt='Key',key_location='l_3')
+    plan['containers']=[box('Сейф','l_1',locked=True),box('Коробка','l_1'),box('Чехол','l_1',parent=1)]
+    plan['f_1']=recipe(container_index=0)
     plan['f_4']=recipe(requires=['f_1','f_3'],tool_name='Лупа',tool_surface='Лупа',tool_image_prompt='Lens',tool_location='l_2')
-    plan['f_7']=recipe(access='container',container_name='Коробка',container_surface='Жестяная коробка',container_image_prompt='Closed box',requires=['f_4'])
+    plan['f_7']=recipe(container_index=2)
     return plan
 
 
@@ -38,6 +43,7 @@ def make_script():
     s={'introduction':'Письмо исчезло из конторы. Выясните обстоятельства.','objective':'Найти письмо и объяснить исчезновение.','known_facts':['Письмо исчезло.','В конторе три свидетеля.'],'hints':['Осмотрите контору.','Сравните время.','Сопоставьте документы.']}
     for i in range(3):
         s[f'n_{i+1}']={'public_context':'Работает в порту.','status':'witness','accounts':[{'topic':str(j),'claim':'Я видела письмо.','private_context':'Вспоминает письмо','requires_evidence':['f_1'] if j==2 else [],'emotion':'calm'} for j in range(3)]}
+    s.update({f'f_{i+1}':{'result':'На документе '+str(i)+' указана встреча в 18:00.'} for i in range(7)})
     return s
 
 
@@ -60,7 +66,7 @@ def test_schema_prevents_forward_dependencies_unknown_rooms_and_unknown_dialogue
     with pytest.raises(ValidationError):world_schema(outline).model_validate(plan)
     plan=make_plan();plan['f_4']['requires']=['f_7']
     with pytest.raises(ValidationError):world_schema(outline).model_validate(plan)
-    plan=make_plan();plan['f_1']['key_location']='l_unknown'
+    plan=make_plan();plan['containers'][0]['key_location']='l_unknown'
     with pytest.raises(ValidationError):world_schema(outline).model_validate(plan)
     s=make_script();s['n_1']['accounts'][0]['requires_evidence']=['s_unavailable']
     with pytest.raises(ValidationError):script_schema(outline).model_validate(s)
@@ -83,8 +89,9 @@ def test_compiled_recipe_combinations_are_executable(outline):
     for _ in range(35):
         plan={}
         for i in range(7):
-            access=rng.choice(['exposed','container','locked_container'])
-            plan[f'f_{i+1}']=recipe(access=access,container_name=f'Контейнер {i}',container_surface='Закрыт',container_image_prompt='Box',key_name=f'Ключ {i}',key_surface='Ключ',key_image_prompt='Key',key_location=f'l_{rng.randrange(3)+1}',requires=[f'f_{j+1}' for j in range(i) if rng.random()<.2])
+            ci=i%3 if rng.random()<.7 else None
+            plan[f'f_{i+1}']=recipe(container_index=ci,requires=['f_1','f_3'] if i==3 else [])
+        plan['containers']=[box(f'Контейнер {i}',f'l_{i+1}',locked=rng.random()<.5) for i in range(3)]
         b=compile_world(outline,plan)
         assert exercise_world(b,['o_7'],bool(rng.randrange(2)))['recovered']==['o_7']
 
@@ -139,11 +146,11 @@ def test_worker_publishes_only_certified_new_pipeline_and_keeps_proof_private(cl
     worker.generate(j,ai)
     row=db.one("SELECT * FROM cases WHERE id='c1'")
     assert row['status']=='ready'
-    assert json.loads(row['blueprint'])['_meta']['generation_version']==2
+    assert json.loads(row['blueprint'])['_meta']['generation_version']==3
     assert json.loads(row['review'])['mechanical_proof']['clues_acquired']==7
     public=client.get('/api/cases/c1').json()
     assert 'certificate' not in public and 'outline' not in public and 'truth' not in public
-    assert public['generation_version']==2 and public['stage']=='ready'
+    assert public['generation_version']==3 and public['stage']=='ready'
 
 
 def test_wrong_independent_solution_cannot_publish_even_if_auditor_misses_it(game,outline):
@@ -177,3 +184,30 @@ def test_unfounded_audit_objection_does_not_rewrite_a_playable_story(game,outlin
     _,review=build(j,ai,SETTINGS)
     assert review['accepted']
     assert ai.calls.count('story_outline')==1
+
+
+def test_nested_containers_reveal_the_real_artifact_only_after_both_open(outline):
+    b=compile_world(outline,make_plan(),make_script());s=world.initial(b)
+    artifact=world.index(b,'objects')['o_7']
+    pouch=world.index(b,'objects')['o_box_3']
+    assert not world.visible(artifact,s) and not world.visible(pouch,s)
+    from conftest import step
+    s,_,_=world.reduce(b,s,[step('open','o_box_2')],{'evidence':[],'text':''})
+    assert world.visible(pouch,s) and not world.visible(artifact,s)
+    s,_,_=world.reduce(b,s,[step('open','o_box_3')],{'evidence':[],'text':''})
+    assert world.visible(artifact,s)
+    s,_,_=world.reduce(b,s,[step('take','o_7')],{'evidence':[],'text':''})
+    assert s['objects']['o_7']['location']=='inventory'
+    assert all(c['intent'].startswith(('Осмотреть:','Прочитать:','Сопоставить:','Провести проверку:')) for c in b['checks'])
+
+
+def test_experiment_without_instrument_and_comparison_without_inputs_are_rejected(outline):
+    plan=make_plan();outline['clues'][1]['method']='experiment'
+    with pytest.raises(ValueError,match='instrument'):compile_world(outline,plan)
+    outline['clues'][1]['method']='read';plan['f_4']['requires']=[]
+    with pytest.raises(ValueError,match='two earlier'):compile_world(outline,plan)
+
+
+def test_container_cannot_replace_the_actual_missing_item(outline):
+    outline['clues'][6]['source_name']='Чехол с письмом'
+    with pytest.raises(ValueError,match='own portable artifact'):validate_outline(outline,SETTINGS)
