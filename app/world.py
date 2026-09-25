@@ -367,10 +367,10 @@ def reduce(b, old, steps, payload, speeches=None):
             for aid in speech['account_ids']:
                 a=allowed[aid]
                 excerpt=next((x['quote'] for x in speech.get('excerpts',[]) if x['account_id']==aid),speech['reply'])
-                add_evidence(s,aid,'Ответ: '+payload['text'][:70] if payload['text'] else a['topic'],excerpt,'statement',npc['name'])
+                add_evidence(s,aid,excerpt[:100]+('…' if len(excerpt)>100 else ''),excerpt,'statement',npc['name'])
                 trigger(b,s,'question',aid,messages)
             if not speech['account_ids'] and speech.get('grounded') and speech.get('recordable',False):
-                add_evidence(s,'s_live_'+db.digest([target,speech['reply']])[:16],'Ответ: '+payload['text'][:70],speech['reply'],'statement',npc['name'])
+                add_evidence(s,'s_live_'+db.digest([target,speech['reply']])[:16],speech['reply'][:100]+('…' if len(speech['reply'])>100 else ''),speech['reply'],'statement',npc['name'])
             for eid in shown: trigger(b,s,'evidence',eid,messages)
             s['dialogue'].append({'person':target,'name':npc['name'],'player':payload['text'],'reply':speech['reply'],'shown':shown,'minute':s['minute']})
             messages.append(npc['name']+': «'+speech['reply']+'»')

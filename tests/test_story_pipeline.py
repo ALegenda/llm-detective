@@ -19,7 +19,7 @@ def outline():
         'places':[{'name':name,'description':name,'atmosphere':'Туман','image_prompt':'Empty architecture','travel_minutes':2} for name in ['Контора','Причал','Мастерская']],
         'cast':[{'name':name,'occupation':'Смотритель','appearance':'Взрослый человек','personality':'Сдержанный','interests':'Работа','location_index':i,'knowledge':['Встреча в 18:00.'],'innocent_secret':''} for i,name in enumerate(['Ирина','Лев','Анна'])],
         'clues':[{'source_name':'Источник '+str(i),'source_surface':'Закрытый документ '+str(i),'source_image_prompt':'Closed paper','location_index':i%3,'portable':i==6,'container_path':['Сейф'] if i==0 else ['Коробка','Чехол'] if i==6 else [],'source_kind':'artifact' if i==6 else 'document','method':'compare' if i==3 else 'read','focus':'запись '+str(i),'observation':'На документе '+str(i)+' указана встреча в 18:00.','significance':'Устанавливает время'} for i in range(7)],
-        'conclusions':[{'description':'Критерий '+str(i),'clue_indices':[i,i+1]} for i in range(3)]}
+        'conclusions':[{'aspect':['identity','method','motive'][i],'description':'Критерий '+str(i),'clue_indices':[i,i+1]} for i in range(3)]}
 
 
 def recipe(**changes):
@@ -48,6 +48,41 @@ def make_script():
 
 
 SETTINGS={'theme':'Портовая история','language':'ru','duration':'short','difficulty':'medium'}
+
+
+@pytest.mark.parametrize('label',['Подменённый образец К-17','Бумажная метка на подменённом образце','Настоящий образец','Counterfeit sample'])
+def test_public_source_name_cannot_announce_the_answer(outline,label):
+    outline['clues'][1]['source_name']=label
+    with pytest.raises(ValueError,match='hidden conclusion'):validate_outline(outline,SETTINGS)
+
+
+def test_comparison_can_reuse_original_object_without_a_fictitious_report(outline):
+    original=outline['clues'][0]
+    for key in ['source_name','source_surface','source_image_prompt','location_index','portable','container_path','source_kind']:
+        outline['clues'][3][key]=copy.deepcopy(original[key])
+    plan=make_plan();plan['f_4']['container_index']=0
+    b=compile_world(validate_outline(outline,SETTINGS),plan,make_script())
+    assert b['checks'][0]['object_id']==b['checks'][3]['object_id']
+    assert len([o for o in b['objects'] if o['name']==original['source_name']])==1
+    exercise_world(b,reverse=False)
+
+
+def test_two_tests_of_one_object_do_not_become_independent_proof(outline):
+    for key in ['source_name','source_surface','source_image_prompt','location_index','portable','container_path','source_kind']:
+        outline['clues'][3][key]=copy.deepcopy(outline['clues'][0][key])
+    outline['conclusions'][0]['clue_indices']=[0,3]
+    with pytest.raises(ValueError,match='two independent physical sources'):validate_outline(outline,SETTINGS)
+
+
+def test_reading_only_case_fails_activity_requirement(outline):
+    outline['clues'][3]['method']='read'
+    with pytest.raises(ValueError,match='player comparisons'):validate_outline(outline,SETTINGS)
+
+
+def test_opening_badges_do_not_single_out_the_hidden_culprit(outline):
+    script=make_script();script['n_1']['status']='person_of_interest'
+    b=compile_world(validate_outline(outline,SETTINGS),make_plan(),script)
+    assert {p['status'] for p in b['briefing']['participants']}=={'contact'}
 
 
 def test_compiler_replay_obtains_all_clues_and_recovers_item_in_both_orders(outline):
@@ -150,11 +185,11 @@ def test_worker_publishes_only_certified_new_pipeline_and_keeps_proof_private(cl
     worker.generate(j,ai)
     row=db.one("SELECT * FROM cases WHERE id='c1'")
     assert row['status']=='ready'
-    assert json.loads(row['blueprint'])['_meta']['generation_version']==5
+    assert json.loads(row['blueprint'])['_meta']['generation_version']==6
     assert json.loads(row['review'])['mechanical_proof']['clues_acquired']==7
     public=client.get('/api/cases/c1').json()
     assert 'certificate' not in public and 'outline' not in public and 'truth' not in public
-    assert public['generation_version']==5 and public['stage']=='ready'
+    assert public['generation_version']==6 and public['stage']=='ready'
 
 
 def test_wrong_independent_solution_cannot_publish_even_if_auditor_misses_it(game,outline):

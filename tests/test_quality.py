@@ -32,6 +32,16 @@ def test_cannot_award_partial_credit_without_player_statement():
     with pytest.raises(InvalidContent,match='credit'):worker.grounded_evaluation(raw,'Моя версия.',['f1'],[{'description':'Кто'}])
 
 
+def test_new_cases_do_not_grade_identity_and_motive_twice():
+    criteria=[{'aspect':aspect,'description':aspect,'evidence_ids':['f1']} for aspect in ['identity','method','motive']]
+    rubric=worker.evaluation_rubric({'criteria':criteria})
+    assert rubric==criteria
+    # Establishing motive earns its share even when identity/method are missing;
+    # an extra combined method-and-motive criterion must not dilute it again.
+    result=worker.grounded_evaluation(report([0,0,2]),'Моя версия.',['f1'],rubric)
+    assert result['score']==3.3 and not result['proved']
+
+
 def feedback():
     return dict(fairness=2,discoveries=1,agency=2,characters=1,pacing=2,highlight='Сопоставление',frustration='Повторы')
 

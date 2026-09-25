@@ -127,6 +127,9 @@ def evaluation_schema(explanation, evidence, rubric_count):
 
 
 def evaluation_rubric(truth):
+    aspects=[c.get('aspect','legacy') for c in truth['criteria']]
+    if all(aspects.count(a)==1 for a in ['identity','method','motive']) and all(a in ['identity','method','motive','detail'] for a in aspects):
+        return truth['criteria']
     references=sorted({eid for c in truth['criteria'] for eid in c['evidence_ids']})
     return truth['criteria'] + [
         {'description':'Кто ответственен: личность связана с приведёнными доказательствами, а не угадана.','evidence_ids':references},
@@ -306,15 +309,17 @@ def asset_job(job,ai):
         if base:instructions+=' EDIT THE PROVIDED REFERENCE: preserve exactly face, age, hair, clothing, palette, framing. Change ONLY expression to '+variant+'. No guilt indicators.'
         else:instructions+=' Calm natural expression.'
     else:
-        instructions+='Editorial object illustration, entire object within generous margins, simple neutral background. Object: '+item['name']+'. Appearance reference: '+item['image_prompt']+' Exterior: '+item['surface']+'\nFINAL VISUAL CONSTRAINT: depict the exterior only. Any reference to document contents, dates, signatures, measurements or clue details is context, not text to paint. Books stay closed; loose paper uses blank/nonsemantic lines. No readable case-specific text, no contents revealed, no magnified clues. Ordinary instrument graduation ticks are allowed and do not represent a performed measurement.'
+        instructions+='Editorial object illustration, entire object within generous margins, simple neutral background. Object: '+item['name']+'. Appearance reference: '+item['image_prompt']+' Exterior: '+item['surface']+'\nFINAL VISUAL CONSTRAINT: depict the exterior only. Any reference to document contents, dates, signatures, measurements or clue details is context, not text to paint. Books show unmarked covers or nonspecific blank pages, preserving their publicly described open/closed state; loose paper uses blank/nonsemantic lines. No readable case-specific text, no contents revealed, no magnified clues. Ordinary instrument graduation ticks are allowed and do not represent a performed measurement.'
     checkpoint=json.loads(job['checkpoint']) if job['checkpoint'] else {}
     if kind=='object' and checkpoint.get('feedback') and not checkpoint.get('file'):
         # A rich source description can keep pulling document contents back
         # into every redraw. Repair from a minimal public silhouette instead
         # of repeating the very reference that caused the rejected content.
+        import re
+        book_view='open with blank, nonsemantic pages' if re.search(r'открыт|раскрыт|\bopen',item['surface'],re.I) else 'closed with an unmarked cover'
         instructions=('Shared palette and rendering style: '+b['visual_style']+
             '\nDraw one isolated object on a plain neutral background, fully inside the frame. Object name: '+item['name']+
-            '. Show only its ordinary exterior silhouette, material and shape. For any paper, photo, chart or loose document show its plain BACK side; for a book, notebook or folder show its CLOSED unmarked cover. No diagrams, tables, handwriting, numbers, dates, labels, lettering, insets or revealed contents. For instruments ordinary graduation ticks are fine. The illustration identifies an object; its evidence is read separately in the game.')
+            '. Show only its ordinary exterior silhouette, material and shape. For any paper, photo, chart or loose document show its plain BACK side; for a book, notebook or folder show it '+book_view+'. No diagrams, tables, handwriting, numbers, dates, labels, lettering, insets or revealed contents. For instruments ordinary graduation ticks are fine. The illustration identifies an object; its evidence is read separately in the game.')
     if checkpoint.get('feedback'):
         instructions+='\nPrevious review feedback (advisory; apply only genuine blocking corrections): '+checkpoint['feedback']+'\nPreserve ordinary instrument graduations and allow subtle emotions even if earlier feedback requested their removal or exaggeration. Final visual constraints above take priority over this historical feedback.'
     rel=checkpoint.get('file')

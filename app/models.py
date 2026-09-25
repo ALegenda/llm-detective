@@ -82,6 +82,7 @@ class Reaction(Model):
 
 
 class Criterion(Model):
+    aspect: Literal['identity','method','motive','detail','legacy'] = 'legacy'
     description: str
     evidence_ids: list[str]
 
