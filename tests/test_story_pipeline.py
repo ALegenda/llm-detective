@@ -110,6 +110,7 @@ class FakeAuthor:
             raise ProviderFailure('provider_connection_unknown',True)
         result={'story_outline':self.outline,'story_world':make_plan(),'story_script':make_script(),
                 'story_reader':{'culprits':['n_1'],'method':'Переложено','motive':'Скрыть время','reasoning':'Документы сходятся','supporting_evidence':['f_1','f_2'],'unresolved_ambiguities':[]},
+                'story_fact_audit':{'issues':[],'strengths':[]},
                 'story_audit':{'issues':self.audit_issues,'strengths':['Материальные маршруты']},'story_adjudication':{'blocking_issue_indices':list(range(len(self.audit_issues))),'reasoning':'Verified'}}[category]
         return schema.model_validate(result).model_dump()
 
@@ -264,3 +265,20 @@ def test_layout_cannot_hide_exposed_trace_or_expose_authored_hidden_artifact(out
 def test_outline_rejects_one_container_in_two_physical_places(outline):
     outline['clues'][1]['container_path']=['Сейф']
     with pytest.raises(ValueError,match='conflicting locations'):validate_outline(outline,SETTINGS)
+
+
+def test_fact_audit_is_scoped_to_observation_inputs_and_repaired_with_script(game,outline):
+    j=queue_job('generate');ai=FakeAuthor(outline);original=ai.structured
+    def audit(category,prompt,context,schema):
+        if category=='story_fact_audit':
+            assert 'knowledge' not in json.dumps(context)
+            assert context['observations'][0]['prior_observations']==[]
+            assert len(context['observations'][3]['prior_observations'])==2
+            return {'issues':[{'stage':'script','target':'f_1','contradiction':'Local inspection compares an unavailable source','correction':'Keep only local marks'}],'strengths':[]}
+        if category=='story_adjudication':return {'blocking_issue_indices':[0],'reasoning':'Two exact conflicting facts verified'}
+        return original(category,prompt,context,schema)
+    ai.structured=audit
+    with pytest.raises(InvalidContent,match='script'):build(j,ai,SETTINGS)
+    cp=json.loads(db.one('SELECT checkpoint FROM jobs WHERE id=?',(j['id'],))['checkpoint'])
+    assert 'outline' in cp and 'world' in cp and 'certificate' in cp
+    assert 'script' not in cp and 'fact_audit' not in cp

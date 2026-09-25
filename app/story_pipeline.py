@@ -370,7 +370,7 @@ def build(job, ai, settings):
         # A repair reruns its stage and dependants, never unrelated finished work.
         dependencies={'outline':['outline','world','script','blueprint','certificate','reader','audit','adjudication'], 'world':['world','script','blueprint','certificate','reader','audit','adjudication'], 'script':['script','blueprint','reader','audit','adjudication']}
         cp.setdefault('drafts',{})[stage]=cp.get(stage)
-        for key in dependencies[stage]:cp.pop(key,None)
+        for key in dependencies[stage]+['fact_audit']:cp.pop(key,None)
         save(stage)
         raise InvalidContent(stage+': '+'; '.join(feedback))
     def stage_call(stage,category,prompt,context,schema):
@@ -396,10 +396,18 @@ def build(job, ai, settings):
         b=compile_world(outline,plan,script,language=settings['language'])
     except ValueError as e:reject('script',[str(e)])
     cp['blueprint']=b;save('reading')
+    contracts=[{'id':c['id'],'source':world.index(b,'objects')[c['object_id']]['name'],
+        'method':outline['clues'][i]['method'],'observation':c['result'],
+        'author_intended_observation':outline['clues'][i]['observation'],
+        'prior_observations':[p['result'] for p in b['checks'] if p['id'] in c['requires_facts']],
+        'tools':[world.index(b,'objects')[t]['name'] for t in c['requires_tools']]} for i,c in enumerate(b['checks'])]
+    facts=stage_call('fact_audit','story_fact_audit',
+        'Check EACH objective observation locally against the fixed past and its own execution inputs. This is a focused factual audit, not a review of dramatic quality. Compare every explicit clock time with the timeline: an object cannot be objectively recorded present after it was removed unless the record is explicitly established as false with obtainable support. An inspect/read must not compare with another undiscovered source; only declared prior_observations are available. A measurement must quote a written value or use the listed instrument. Flag concrete incompatible claims, never speculative extra requirements. Identify f_N and quote the exact two conflicting assertions. If the intended observation itself contradicts the past, stage=outline; if the rewritten result introduces the contradiction or unsupported comparison, stage=script. No world issues. Keep all source facts that are already consistent.',
+        {'fixed_past':b['truth'],'opening':b['introduction'],'observations':contracts},StoryAudit)
     reader=stage_call('reader','story_reader','Solve this mystery from the player-obtainable MATERIAL evidence ONLY. You are a critical reader, not an author. No confession or private knowledge is supplied. Identify who/how/why with concrete cited material evidence. If several explanations fit equally well, state the ambiguity honestly. Do not invent unseen facts. All supplied physical observations have actually been acquired in a legal engine replay.',
         {'briefing':b['introduction'],'assignment':b['briefing'],'people':[{k:p[k] for k in ['id','name','role']} for p in b['people']], 'observations':[{'id':c['id'],'source':world.index(b,'objects')[c['object_id']]['name'],'text':c['result']} for c in b['checks']]},reader_schema(b))
     audit=stage_call('audit','story_audit',AUDIT_PROMPT,{'outline':outline,'blueprint':b,'independent_reader':reader,'observation_contracts':[{'check':c['id'],'source':world.index(b,'objects')[c['object_id']]['name'],'location':world.index(b,'objects')[c['object_id']]['location'],'method':outline['clues'][i]['method'],'tools':[world.index(b,'objects')[t]['name'] for t in c['requires_tools']],'prior_observations':c['requires_facts']} for i,c in enumerate(b['checks'])],'mechanical_proof':{'orders_tested':2,'all_material_clues_acquired':True,'required_items_recovered':True}},StoryAudit)
-    issues=audit['issues']
+    issues=facts['issues']+audit['issues']
     if issues:
         resolution_schema=create_model('VerifiedAuditIssues',__base__=AuditResolution,
             blocking_issue_indices=(list[Literal.__getitem__(tuple(range(len(issues))))],...))
