@@ -85,6 +85,27 @@ def test_visual_review_retry_reuses_rendered_image(game):
     assert ai.calls==1 and len(db.all_rows('SELECT * FROM assets'))==1
 
 
+def test_rejected_document_redraw_drops_conflicting_content_reference(game):
+    import json
+    job=queue_job('asset',{'kind':'object','entity':'o_letter','variant':'base'})
+    class ControlledAI:
+        case=db.one("SELECT * FROM cases WHERE id='c1'")
+        prompts=[]
+        def image(self,prompt,*args,**kwargs):
+            self.prompts.append(prompt)
+            return b'controlled image'
+        def structured(self,*args,**kwargs):
+            return {'accepted':len(self.prompts)>1,'reason':'Invented handwritten dates'}
+    ai=ControlledAI();blueprint=json.loads(ai.case['blueprint'])
+    next(o for o in blueprint['objects'] if o['id']=='o_letter')['image_prompt']='A filled table, signature and readable 18:00'
+    ai.case['blueprint']=db.encode(blueprint)
+    with pytest.raises(InvalidContent):worker.asset_job(job,ai)
+    worker.asset_job(db.one('SELECT * FROM jobs WHERE id=?',(job['id'],)),ai)
+    assert len(ai.prompts)==2 and 'readable 18:00' in ai.prompts[0] and 'readable 18:00' not in ai.prompts[1]
+    assert 'BACK side' in ai.prompts[1]
+    assert db.one('SELECT status FROM jobs WHERE id=?',(job['id'],))['status']=='done'
+
+
 def test_rate_limit_waits_for_provider_window_instead_of_exhausting_in_seconds(game):
     job=queue_job('asset');job['attempts']=3
     now=time.time();worker.fail_job(job,ProviderFailure('provider_429',True,270))
@@ -102,3 +123,15 @@ def test_zero_budgets_allow_authorized_test_window(game,monkeypatch):
     assert ai.start('image','controlled-model')
     monkeypatch.setenv('DAILY_CALL_LIMIT','1')
     with pytest.raises(ProviderFailure,match='budget_limit'):ai.start('image','controlled-model')
+
+
+def test_long_generation_cannot_occupy_the_interactive_worker(game):
+    with db.transaction() as con:
+        db.enqueue(con,'c1','generate',{},'story-first',1)
+        db.enqueue(con,'c1','asset',{},'art-second',2)
+        db.enqueue(con,'c1','command',{},'player-third',10)
+    # Even with a higher-priority story waiting, input owns its own lane.
+    assert db.claim('interactive')['kind']=='command'
+    assert db.claim('interactive') is None
+    assert db.claim('generation')['kind']=='generate'
+    assert db.claim('assets')['kind']=='asset'

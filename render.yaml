@@ -22,7 +22,7 @@ services:
       - key: PORT
         value: "8080"
       - key: WORKERS
-        value: "2"
+        value: "3"
       - key: CASE_CALL_LIMIT
         value: "140"
       - key: ATTEMPT_CALL_LIMIT

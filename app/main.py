@@ -105,8 +105,9 @@ def admin(user=Depends(authenticate)):
 async def lifespan(app):
     config.preflight();db.init()
     stop=threading.Event()
-    count=max(2,min(4,int(os.getenv('WORKERS','2'))))
-    threads=[threading.Thread(target=worker.run,args=(stop,'interactive' if i==0 else 'assets'),daemon=True) for i in range(count)]
+    count=max(3,min(4,int(os.getenv('WORKERS','3'))))
+    lanes=['interactive','generation','assets']+(['generation'] if count==4 else [])
+    threads=[threading.Thread(target=worker.run,args=(stop,lane),daemon=True) for lane in lanes]
     for t in threads:t.start()
     yield
     stop.set()

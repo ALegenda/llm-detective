@@ -102,7 +102,7 @@ def claim(lane=None):
     now = time.time()
     with transaction() as con:
         # A stalled worker's fencing token is replaced before another worker runs.
-        clause = " AND kind='asset'" if lane=='assets' else " AND kind!='asset'" if lane=='interactive' else ''
+        clause = {'assets':" AND kind='asset'",'interactive':" AND kind='command'",'generation':" AND kind='generate'"}.get(lane,'')
         row = con.execute("SELECT * FROM jobs WHERE ((status IN ('queued','retry') AND available<=?) OR (status='running' AND lease_until<?))"+clause+" ORDER BY priority,created LIMIT 1", (now, now)).fetchone()
         if not row:
             return None
