@@ -75,6 +75,7 @@ def init():
         CREATE TABLE IF NOT EXISTS operations(id TEXT PRIMARY KEY,case_id TEXT NOT NULL,user_id TEXT NOT NULL,job_id TEXT,category TEXT NOT NULL,status TEXT NOT NULL,model TEXT NOT NULL,request_id TEXT,input_tokens INTEGER DEFAULT 0,output_tokens INTEGER DEFAULT 0,elapsed REAL,error_code TEXT,created REAL NOT NULL);
         CREATE TABLE IF NOT EXISTS audit(id INTEGER PRIMARY KEY,user_id TEXT NOT NULL,action TEXT NOT NULL,target TEXT NOT NULL,created REAL NOT NULL);
         CREATE TABLE IF NOT EXISTS rate_limits(key TEXT PRIMARY KEY,count INTEGER NOT NULL,expires REAL NOT NULL);
+        CREATE TABLE IF NOT EXISTS story_feedback(attempt_id TEXT PRIMARY KEY REFERENCES attempts(id),user_id TEXT NOT NULL REFERENCES users(id),rubric_version INTEGER NOT NULL,payload TEXT NOT NULL,score INTEGER NOT NULL,created REAL NOT NULL,updated REAL NOT NULL);
         ''')
         # Version 2 adds a durable, job-scoped structured-response cache.
         columns={row[1] for row in con.execute('PRAGMA table_info(operations)')}

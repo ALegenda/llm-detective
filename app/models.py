@@ -195,6 +195,7 @@ class ClaimAssessment(Model):
 class CriterionAssessment(Model):
     criterion_index: int = Field(ge=0)
     satisfied: bool
+    credit: int = Field(ge=0, le=2, description='2 = fully established with cited evidence (satisfied=true); 1 = correct but incomplete or unsourced argument; 0 = omitted or contradicted. Partial credit requires an actual player quotation. Never reward a guess contradicted by evidence.')
     quote: str = Field(description='Exact passage from the player explanation establishing this criterion, or empty if not addressed.')
     evidence_ids: list[str] = Field(description='Only IDs of actually cited evidence supporting this assessment.')
     feedback: str
@@ -209,6 +210,16 @@ class QuotedEvaluation(Model):
 class VisualReview(Model):
     accepted: bool
     reason: str
+
+
+class StoryFeedback(Model):
+    fairness: int = Field(ge=0, le=2, strict=True)
+    discoveries: int = Field(ge=0, le=2, strict=True)
+    agency: int = Field(ge=0, le=2, strict=True)
+    characters: int = Field(ge=0, le=2, strict=True)
+    pacing: int = Field(ge=0, le=2, strict=True)
+    highlight: str = Field(default='', max_length=1000)
+    frustration: str = Field(default='', max_length=1000)
 
 
 class Settings(Model):

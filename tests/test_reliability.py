@@ -326,7 +326,7 @@ def test_finish_pipeline_persists_rubric_grounded_verdict(client,game):
         def structured(self,category,prompt,context,schema):
             assert category=='evaluation'
             raw={'claims':[{'quote':explanation,'status':'accurate','feedback':'Верно'}],
-                 'criteria':[{'criterion_index':i,'satisfied':True,'quote':explanation,'evidence_ids':evidence,'feedback':'Подтверждено'} for i in range(len(context['rubric']))],
+                 'criteria':[{'criterion_index':i,'satisfied':True,'credit':2,'quote':explanation,'evidence_ids':evidence,'feedback':'Подтверждено'} for i in range(len(context['rubric']))],
                  'evidence_assessment':['Сопоставлены независимые источники.']}
             # Exercise the actual dynamic response schema before the reducer.
             return schema.model_validate(raw).model_dump()

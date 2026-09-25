@@ -19,7 +19,7 @@ from fastapi import FastAPI, Request, HTTPException, Depends
 from fastapi.responses import FileResponse, JSONResponse, RedirectResponse
 from fastapi.staticfiles import StaticFiles
 from . import config, db, world, worker
-from .models import Settings, AuthInput, CommandInput, NoteInput
+from .models import Settings, AuthInput, CommandInput, NoteInput, StoryFeedback
 
 
 TELEGRAM_STATE_COOKIE = 'detective_telegram_state'
@@ -381,16 +381,30 @@ def attempt_details(aid:str,user=Depends(authenticate)):
     pending=db.one("SELECT id,status FROM commands WHERE attempt_id=? AND status IN ('queued','running')",(aid,))
     assets=[{k:x[k] for k in ['id','kind','entity_id','variant']} for x in db.all_rows('SELECT * FROM assets WHERE case_id=?',(c['id'],)) if permitted_asset(x,b,s)]
     asset_jobs=[]
-    for j in db.all_rows("SELECT id,payload,status FROM jobs WHERE case_id=? AND kind='asset'",(c['id'],)):
+    for j in db.all_rows("SELECT id,payload,status,error_code FROM jobs WHERE case_id=? AND kind='asset'",(c['id'],)):
         p=json.loads(j['payload'])
         if permitted_asset({'kind':p['kind'],'entity_id':p['entity']},b,s):
-            asset_jobs.append({'id':j['id'],'kind':p['kind'],'entity_id':p['entity'],'variant':p['variant'],'status':j['status']})
+            asset_jobs.append({'id':j['id'],'kind':p['kind'],'entity_id':p['entity'],'variant':p['variant'],'status':j['status'],'error_code':j['error_code']})
     failed=db.one("SELECT commands.id,commands.result,jobs.id AS job_id FROM commands JOIN jobs ON jobs.command_id=commands.id WHERE attempt_id=? AND commands.status='failed' AND expected_version=? ORDER BY commands.created DESC LIMIT 1",(aid,a['version']))
+    feedback=db.one('SELECT payload,score FROM story_feedback WHERE attempt_id=?',(aid,))
     return {'asset_jobs':asset_jobs,'failed_command':{'id':failed['id'],'job_id':failed['job_id'],'result':json.loads(failed['result'])} if failed else None,'id':a['id'],'case_id':c['id'],'title':b['title'],'introduction':b['introduction'],'start_time':b['start_time'],'setting_rules':b['setting_rules'],'language':json.loads(c['settings'])['language'],
         'version':a['version'],'status':a['status'],'world':world.public_world(b,s),'briefing':world.public_briefing(b,json.loads(c['settings'])['language']),'assets':assets,'pending':pending,
         'events':[json.loads(e['public'])|{'minute':e['minute'],'event_id':e['id']} for e in db.all_rows('SELECT id,public,minute FROM events WHERE attempt_id=? ORDER BY id',(aid,))],
         'verdict':json.loads(a['verdict']) if a['verdict'] else None,
+        'story_feedback':json.loads(feedback['payload'])|{'score':feedback['score']} if feedback else None,
         'spoiled':bool(db.one("SELECT id FROM attempts WHERE case_id=? AND status='finished' AND id!=?",(c['id'],aid)))}
+
+
+@app.post('/api/attempts/{aid}/feedback')
+def story_feedback(aid:str,body:StoryFeedback,user=Depends(authenticate)):
+    a=owned_attempt(aid,user)
+    if a['status']!='finished':raise HTTPException(409,'Оценка сюжета доступна после завершения расследования.')
+    payload=body.model_dump();score=sum(payload[k] for k in ['fairness','discoveries','agency','characters','pacing'])
+    now=time.time()
+    with db.transaction() as con:
+        con.execute('INSERT INTO story_feedback(attempt_id,user_id,rubric_version,payload,score,created,updated) VALUES(?,?,?,?,?,?,?) ON CONFLICT(attempt_id) DO UPDATE SET payload=excluded.payload,score=excluded.score,updated=excluded.updated',
+                    (aid,user['id'],1,db.encode(payload),score,now,now))
+    return payload|{'score':score}
 
 
 @app.post('/api/attempts/{aid}/commands',status_code=202)
