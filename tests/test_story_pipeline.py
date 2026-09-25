@@ -17,7 +17,7 @@ def outline():
         'method':'Письмо переложено в коробку','motive':'Скрыть перенос встречи','timeline':['08:00 письмо получено','08:10 встреча перенесена','08:20 письмо скрыто','08:30 обнаружена пропажа'],
         'explanation':'Ирина скрыла письмо с новым временем встречи.','dramatic_question':'Почему письмо исчезло?','fair_reversal':'Опоздание оказалось намеренным.',
         'places':[{'name':name,'description':name,'atmosphere':'Туман','image_prompt':'Empty architecture','travel_minutes':2} for name in ['Контора','Причал','Мастерская']],
-        'cast':[{'name':name,'role':'Свидетель','appearance':'Взрослый человек','personality':'Сдержанный','interests':'Работа','location_index':i,'knowledge':['Встреча в 18:00.'],'innocent_secret':''} for i,name in enumerate(['Ирина','Лев','Анна'])],
+        'cast':[{'name':name,'occupation':'Смотритель','appearance':'Взрослый человек','personality':'Сдержанный','interests':'Работа','location_index':i,'knowledge':['Встреча в 18:00.'],'innocent_secret':''} for i,name in enumerate(['Ирина','Лев','Анна'])],
         'clues':[{'source_name':'Источник '+str(i),'source_surface':'Закрытый документ '+str(i),'source_image_prompt':'Closed paper','location_index':i%3,'portable':i==6,'container_path':['Сейф'] if i==0 else ['Коробка','Чехол'] if i==6 else [],'source_kind':'artifact' if i==6 else 'document','method':'compare' if i==3 else 'read','focus':'запись '+str(i),'observation':'На документе '+str(i)+' указана встреча в 18:00.','significance':'Устанавливает время'} for i in range(7)],
         'conclusions':[{'description':'Критерий '+str(i),'clue_indices':[i,i+1]} for i in range(3)]}
 
@@ -150,11 +150,11 @@ def test_worker_publishes_only_certified_new_pipeline_and_keeps_proof_private(cl
     worker.generate(j,ai)
     row=db.one("SELECT * FROM cases WHERE id='c1'")
     assert row['status']=='ready'
-    assert json.loads(row['blueprint'])['_meta']['generation_version']==4
+    assert json.loads(row['blueprint'])['_meta']['generation_version']==5
     assert json.loads(row['review'])['mechanical_proof']['clues_acquired']==7
     public=client.get('/api/cases/c1').json()
     assert 'certificate' not in public and 'outline' not in public and 'truth' not in public
-    assert public['generation_version']==4 and public['stage']=='ready'
+    assert public['generation_version']==5 and public['stage']=='ready'
 
 
 def test_wrong_independent_solution_cannot_publish_even_if_auditor_misses_it(game,outline):
@@ -282,3 +282,9 @@ def test_fact_audit_is_scoped_to_observation_inputs_and_repaired_with_script(gam
     cp=json.loads(db.one('SELECT checkpoint FROM jobs WHERE id=?',(j['id'],))['checkpoint'])
     assert 'outline' in cp and 'world' in cp and 'certificate' in cp
     assert 'script' not in cp and 'fact_audit' not in cp
+
+
+@pytest.mark.parametrize('field',['name','occupation','appearance'])
+def test_public_cast_fields_cannot_disclose_guilt_before_play(outline,field):
+    outline['cast'][0][field]='Реставратор; виновник кражи'
+    with pytest.raises(ValueError,match='guilt label'):validate_outline(outline,SETTINGS)
