@@ -329,6 +329,10 @@ def asset_job(job,ai):
             if not storage.image_space_available():
                 raise ProviderFailure('storage_full',True,300)
         data=ai.image(instructions,str(config.DATA/base['path']) if base else None,landscape=kind=='location')
+        # Generation can take minutes while other workers save data. Check
+        # again with the actual image size before consuming the DB reserve.
+        if not storage.image_space_available(len(data)):
+            raise ProviderFailure('storage_full',True,300)
         rel='assets/'+db.uid()+'.png'
         path=config.DATA/rel; tmp=path.with_suffix('.part');tmp.write_bytes(data);tmp.replace(path)
         db.save_checkpoint(job,{'file':rel})

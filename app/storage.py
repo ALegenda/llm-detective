@@ -9,9 +9,9 @@ log=logging.getLogger('detective.storage')
 IMAGE_RESERVE=64*1024*1024
 
 
-def image_space_available():
+def image_space_available(additional_bytes=0):
     # Image generation must leave room for saved progress and SQLite's journal.
-    return shutil.disk_usage(config.DATA).free >= IMAGE_RESERVE
+    return shutil.disk_usage(config.DATA).free >= IMAGE_RESERVE+additional_bytes
 
 
 def prune_discarded_images(min_age=3600):

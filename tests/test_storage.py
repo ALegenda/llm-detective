@@ -43,3 +43,12 @@ def test_disk_reserve_stops_art_before_provider_spend_but_keeps_progress(game,mo
         def image(self,*args,**kwargs):raise AssertionError('Must reserve space before spending')
     with pytest.raises(ProviderFailure,match='storage_full'):worker.asset_job(job,NoSpendAI())
     assert db.one("SELECT status FROM attempts WHERE id='a1'")['status']=='active'
+
+
+def test_disk_filling_during_generation_does_not_consume_progress_reserve(game,monkeypatch):
+    from types import SimpleNamespace
+    monkeypatch.setattr(storage.shutil,'disk_usage',lambda path:SimpleNamespace(free=storage.IMAGE_RESERVE+10))
+    job=queue_job('asset',{'kind':'object','entity':'o_key','variant':'base'})
+    with pytest.raises(ProviderFailure,match='storage_full'):worker.asset_job(job,ImageAI())
+    assert not list((config.DATA/'assets').iterdir())
+    assert not db.all_rows('SELECT * FROM assets')
