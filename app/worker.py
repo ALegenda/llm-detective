@@ -334,7 +334,7 @@ def fail_job(job,error):
         latest=db.one('SELECT checkpoint FROM jobs WHERE id=?',(job['id'],))
         cp=json.loads(latest['checkpoint']) if latest and latest['checkpoint'] else {}
         if cp.get('pipeline_version',1)>=2 and cp.get('revision',0):
-            content_retry=job['repair_count']<4 and cp['revision']<=4 and cp.get('rejections',{}).get(cp.get('stage'),0)<=2
+            content_retry=job['repair_count']<4 and cp.get('repair_round_failures',cp['revision'])<=4 and cp.get('rejections',{}).get(cp.get('stage'),0)<=2
     retry=content_retry or (isinstance(error,ProviderFailure) and error.retryable and job['attempts']<3)
     if code=='waiting_for_base':retry=job['attempts']<12
     delay=max(getattr(error,'retry_after',0),min(90,2**job['attempts']+random.uniform(0,2)))

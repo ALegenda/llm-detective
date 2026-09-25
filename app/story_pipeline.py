@@ -331,6 +331,7 @@ def build(job, ai, settings):
     def reject(stage,feedback):
         cp.setdefault('feedback',{})[stage]=feedback
         cp['revision']+=1
+        cp['repair_round_failures']=cp.get('repair_round_failures',0)+1
         cp.setdefault('rejections',{})[stage]=cp.get('rejections',{}).get(stage,0)+1
         # A repair reruns its stage and dependants, never unrelated finished work.
         dependencies={'outline':['outline','world','script','blueprint','certificate','reader','audit','adjudication'], 'world':['world','script','blueprint','certificate','reader','audit','adjudication'], 'script':['script','blueprint','reader','audit','adjudication']}

@@ -235,3 +235,13 @@ def test_shared_container_and_exterior_fixture_use_one_physical_object(outline):
     assert len([o for o in b['objects'] if o['name']=='Коробка'])==1
     assert b['checks'][0]['object_id']==b['checks'][6]['requires_open']=='o_box_1'
     assert exercise_world(b,['o_7'])['recovered']==['o_7']
+
+
+def test_manual_retry_resets_repair_budget_but_preserves_revision_and_stages(client,game):
+    j=queue_job('generate')
+    db.save_checkpoint(j,{'pipeline_version':3,'revision':8,'repair_round_failures':5,'stage':'world','rejections':{'world':3},'outline':{'kept':True}})
+    with db.transaction() as con:con.execute("UPDATE jobs SET status='failed' WHERE id=?",(j['id'],))
+    assert client.post('/api/jobs/'+j['id']+'/retry').status_code==200
+    cp=json.loads(db.one('SELECT checkpoint FROM jobs WHERE id=?',(j['id'],))['checkpoint'])
+    assert cp['revision']==8 and cp['outline']=={'kept':True}
+    assert cp['rejections']=={} and cp['repair_round_failures']==0

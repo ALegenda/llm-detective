@@ -474,6 +474,12 @@ def retry_job(jid,user,is_admin):
             if a['version']!=c['expected_version'] or a['status']!='active':raise HTTPException(409,'Мир уже изменился. Сформулируйте новое действие.')
             if con.execute("SELECT id FROM commands WHERE attempt_id=? AND status IN ('queued','running')",(a['id'],)).fetchone():raise HTTPException(409,'Уже выполняется другая команда.')
             con.execute("UPDATE commands SET status='queued',result=NULL WHERE id=?",(j['command_id'],))
+        checkpoint=json.loads(j['checkpoint']) if j['checkpoint'] else {}
+        if checkpoint.get('pipeline_version',1)>=2:
+            # Explicit manual retry starts a new bounded repair round. Preserve
+            # monotonic revision/cache context and all successful stages.
+            checkpoint.update(rejections={},repair_round_failures=0)
+            con.execute('UPDATE jobs SET checkpoint=? WHERE id=?',(db.encode(checkpoint),jid))
         con.execute("UPDATE jobs SET status='queued',attempts=0,repair_count=0,available=?,error_code=NULL,updated=? WHERE id=?",(time.time(),time.time(),jid))
         if j['kind']=='generate':con.execute("UPDATE cases SET status='queued' WHERE id=?",(j['case_id'],))
         con.execute('INSERT INTO audit(user_id,action,target,created) VALUES(?,?,?,?)',(user['id'],'retry',jid,time.time()))
