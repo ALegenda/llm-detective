@@ -185,11 +185,15 @@ def world_schema(o):
     rooms=tuple(f'l_{i+1}' for i in range(len(o['places'])))
     container=create_model('ReachableContainer',__base__=ContainerRecipe,location=(Literal.__getitem__(rooms),...),key_location=(Literal.__getitem__(('',)+rooms),...))
     fields={'containers':(list[container],Field(max_length=3))}
-    for i in range(len(o['clues'])):
-        prior=tuple(f'f_{j+1}' for j in range(i))
+    for i,c in enumerate(o['clues']):
+        prior=tuple(f'f_{j+1}' for j in range(i)) if c['method'] in ['compare','experiment'] else ()
+        limits={'min_length':2} if c['method']=='compare' else {}
+        if not prior:limits['max_length']=0
+        tool_rooms=rooms if c['method']=='experiment' else ('',)+rooms
         recipe=create_model(f'AccessForClue{i+1}',__base__=AccessRecipe,
-            tool_location=(Literal.__getitem__(('',)+rooms),...),
-            requires=(list[Literal.__getitem__(prior)] if prior else list[str],Field(**({} if prior else {'max_length':0}))))
+            tool_name=(str,Field(min_length=1) if c['method']=='experiment' else Field()),
+            tool_location=(Literal.__getitem__(tool_rooms),...),
+            requires=(list[Literal.__getitem__(prior)] if prior else list[str],Field(**limits)))
         fields[f'f_{i+1}']=(recipe,...)
     return create_model('CompiledAccessPlan',__base__=Model,**fields)
 

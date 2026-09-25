@@ -64,6 +64,8 @@ def test_compiler_replay_obtains_all_clues_and_recovers_item_in_both_orders(outl
 def test_schema_prevents_forward_dependencies_unknown_rooms_and_unknown_dialogue_evidence(outline):
     plan=make_plan();plan['f_1']['requires']=['f_7']
     with pytest.raises(ValidationError):world_schema(outline).model_validate(plan)
+    plan=make_plan();plan['f_2']['requires']=['f_1']
+    with pytest.raises(ValidationError):world_schema(outline).model_validate(plan)
     plan=make_plan();plan['f_4']['requires']=['f_7']
     with pytest.raises(ValidationError):world_schema(outline).model_validate(plan)
     plan=make_plan();plan['containers'][0]['key_location']='l_unknown'
@@ -203,9 +205,9 @@ def test_nested_containers_reveal_the_real_artifact_only_after_both_open(outline
 
 def test_experiment_without_instrument_and_comparison_without_inputs_are_rejected(outline):
     plan=make_plan();outline['clues'][1]['method']='experiment'
-    with pytest.raises(ValueError,match='instrument'):compile_world(outline,plan)
+    with pytest.raises(ValueError):compile_world(outline,plan)
     outline['clues'][1]['method']='read';plan['f_4']['requires']=[]
-    with pytest.raises(ValueError,match='two earlier'):compile_world(outline,plan)
+    with pytest.raises(ValueError):compile_world(outline,plan)
 
 
 def test_container_cannot_replace_the_actual_missing_item(outline):
