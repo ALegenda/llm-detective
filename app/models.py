@@ -158,12 +158,15 @@ class StatementExcerpt(Model):
     quote: str = Field(description="Short exact contiguous excerpt of reply conveying this account, without unrelated conversation.")
 
 
-class Speech(Model):
+class DialogueDraft(Model):
     reply: str
     account_ids: list[str]
-    excerpts: list[StatementExcerpt]
     emotion: Literal['calm','warm','guarded','anxious','irritated','sad','surprised']
     attitude: Literal['neutral','friendly','hostile']
+
+
+class Speech(DialogueDraft):
+    excerpts: list[StatementExcerpt]
 
 
 class SpeechAudit(Model):

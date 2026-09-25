@@ -78,8 +78,8 @@ def test_bad_dialogue_is_rewritten_not_replaced_with_author_notes(client,game,re
                 self.count+=1
                 if self.count==2:assert context['repair_feedback']
                 text='Я была в саду в шесть.' if self.count==2 and repaired else 'Ирина была в саду в шесть.'
-                return schema.model_validate({'reply':text,'account_ids':['s_time'],'excerpts':[{'account_id':'s_time','quote':text}],'emotion':'calm','attitude':'neutral'}).model_dump()
-            return schema.model_validate({'grounded':True,'answers_question':True,'in_character':self.count==2 and repaired,'recordable':True,'reason':'Third-person self-reference'}).model_dump()
+                return schema.model_validate({'reply':text,'account_ids':['s_time'],'emotion':'calm','attitude':'neutral'}).model_dump()
+            return schema.model_validate({'grounded':True,'answers_question':True,'in_character':self.count==2 and repaired,'recordable':True,'reason':'Third-person self-reference','excerpts':[{'account_id':'s_time','quote':context['speech']['reply']}]}).model_dump()
     ai=AI();job=db.claim()
     if repaired:
         worker.command_job(job,ai)
@@ -100,3 +100,16 @@ def test_repeat_search_can_recover_an_object_hidden_again(game):
     after,result,_=world.reduce(b,s,[step('check','o_desk','f_lock')],P)
     assert after['objects']['o_key']['visible']
     assert result['minutes']==2 and result['evidence_ids']==[]
+
+
+def test_dialogue_auditor_can_only_select_words_the_character_actually_said():
+    from pydantic import ValidationError
+    from app.worker import speech_audit_schema
+    speech={'reply':'Я была в саду в шесть. Больше я ничего не видела.','account_ids':['s_time']}
+    schema=speech_audit_schema(speech)
+    verdict={'grounded':True,'answers_question':True,'in_character':True,'recordable':True,'reason':'Supported','excerpts':[{'account_id':'s_time','quote':'Я была в саду в шесть.'}]}
+    assert schema.model_validate(verdict).excerpts[0].quote in speech['reply']
+    verdict['excerpts'][0]['quote']='Я была в саду в семь.'
+    with pytest.raises(ValidationError):schema.model_validate(verdict)
+    verdict['excerpts'][0]={'account_id':'s_unrelated','quote':'Я была в саду в шесть.'}
+    with pytest.raises(ValidationError):schema.model_validate(verdict)
