@@ -100,6 +100,7 @@ def publish_case(job,case,b,review):
             complete(con,job);return
         now=time.time()
         b['_meta']={'schema_version':1,'prompt_version':config.PROMPT_VERSION,'text_model':config.TEXT_MODEL,'image_model':config.IMAGE_MODEL,'truth_hash':db.digest(b['truth']),'generation_version':review.get('pipeline_version',1)}
+        if review.get('pipeline_version',1)>=2:b['_meta'].update(story_model=config.STORY_MODEL,story_reasoning=config.STORY_REASONING)
         con.execute("UPDATE cases SET blueprint=?,review=?,status='ready',updated=? WHERE id=?",(db.encode(b),db.encode(review),now,case['id']))
         aid=db.uid(); state=world.initial(b); world.observe_people(b,state)
         con.execute('INSERT INTO attempts(id,case_id,user_id,state,initial_state,created,updated) VALUES(?,?,?,?,?,?,?)',(aid,case['id'],case['user_id'],db.encode(state),db.encode(state),now,now))

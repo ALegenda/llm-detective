@@ -73,17 +73,20 @@ class AI:
             raise
 
     def structured(self, category, instructions, context, model_type, images=None):
-        cache_key=db.digest({'prompt_version':config.PROMPT_VERSION,'category':category,'instructions':instructions,'context':context,'model':config.TEXT_MODEL,'schema':model_type.model_json_schema(),'images':[db.digest(base64.b64encode(i).decode()) for i in images or []]})
+        authoring=category.startswith('story_')
+        model=config.STORY_MODEL if authoring else config.TEXT_MODEL
+        options={'reasoning':{'effort':config.STORY_REASONING}} if authoring else {}
+        cache_key=db.digest({'prompt_version':config.PROMPT_VERSION,'category':category,'instructions':instructions,'context':context,'model':model,'options':options,'schema':model_type.model_json_schema(),'images':[db.digest(base64.b64encode(i).decode()) for i in images or []]})
         cached=db.one("SELECT response FROM operations WHERE job_id=? AND cache_key=? AND status='done' AND response IS NOT NULL ORDER BY created DESC LIMIT 1",(self.job['id'],cache_key))
         if cached:
             return model_type.model_validate(json.loads(cached['response'])).model_dump()
         content = [{'type':'input_text','text':db.encode(context)}]
         for data in images or []:
             content.append({'type':'input_image','image_url':'data:image/png;base64,' + base64.b64encode(data).decode()})
-        result = self.invoke(category, config.TEXT_MODEL, lambda: self.client.responses.parse(
-            model=config.TEXT_MODEL, instructions=instructions+'\nRequired output language for player-visible strings: '+({'ru':'Russian (русский)','en':'English'}.get(context.get('language') or context.get('settings',{}).get('language'), 'as specified in the brief'))+'.',
+        result = self.invoke(category, model, lambda: self.client.responses.parse(
+            model=model, **options, instructions=instructions+'\nRequired output language for player-visible strings: '+({'ru':'Russian (русский)','en':'English'}.get(context.get('language') or context.get('settings',{}).get('language'), 'as specified in the brief'))+'.',
             input=[{'role':'user','content':content}], text_format=model_type,
-            max_output_tokens={'blueprint':18000,'story_outline':12000,'story_world':7000,'story_script':9000}.get(category,4000),
+            max_output_tokens={'blueprint':18000,'story_outline':22000,'story_world':14000,'story_script':18000}.get(category,12000 if authoring else 4000),
             store=True),cache_key=cache_key)
         if result.output_parsed is None:
             raise InvalidContent('Model refused or returned incomplete structured data')

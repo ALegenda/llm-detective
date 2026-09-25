@@ -449,3 +449,28 @@ def test_repeated_rejected_drafts_get_new_repair_context(game,blueprint):
         job=db.one('SELECT * FROM jobs WHERE id=?',(job['id'],))
         assert json.loads(job['checkpoint'])['revision']==expected+1
     assert ai.revisions==[0,1,2]
+
+
+def test_story_calls_use_dedicated_reasoning_model_and_cache_identity(game,monkeypatch):
+    from types import SimpleNamespace
+    from app import config
+    from app.ai import AI
+    from app.models import StateReview
+    monkeypatch.setattr(config,'STORY_MODEL','story-model')
+    monkeypatch.setattr(config,'STORY_REASONING','medium')
+    monkeypatch.setattr(config,'TEXT_MODEL','fast-model')
+    ai=AI.__new__(AI);ai.job=queue_job('generate');calls=[];keys=[]
+    def parse(**kwargs):
+        calls.append(kwargs)
+        return SimpleNamespace(output_parsed=StateReview(accepted=True,issues=[]))
+    ai.client=SimpleNamespace(responses=SimpleNamespace(parse=parse))
+    def invoke(category,model,fn,cache_key=None):
+        keys.append((model,cache_key));return fn()
+    ai.invoke=invoke
+    ai.structured('story_outline','Write',{},StateReview)
+    assert calls[-1]['model']=='story-model' and calls[-1]['reasoning']=={'effort':'medium'}
+    monkeypatch.setattr(config,'STORY_REASONING','high')
+    ai.structured('story_outline','Write',{},StateReview)
+    assert keys[-1][1]!=keys[-2][1]
+    ai.structured('dialogue','Write',{},StateReview)
+    assert calls[-1]['model']=='fast-model' and 'reasoning' not in calls[-1]

@@ -12,6 +12,8 @@ for path in [Path(os.getenv('ENV_FILE', ROOT / '.env'))]:
 DATA = Path(os.getenv('DATA_DIR', ROOT / 'data')).resolve()
 DB_PATH = DATA / 'detective.sqlite3'
 TEXT_MODEL = os.getenv('OPENAI_TEXT_MODEL', 'gpt-5.4-mini')
+STORY_MODEL = os.getenv('OPENAI_STORY_MODEL', 'gpt-5.4')
+STORY_REASONING = os.getenv('OPENAI_STORY_REASONING', 'medium')
 IMAGE_MODEL = os.getenv('OPENAI_IMAGE_MODEL', 'gpt-image-2.5-flare')
 PRODUCTION = os.getenv('APP_ENV') == 'production'
 # Render sets RENDER_EXTERNAL_URL (https://….onrender.com); prefer explicit APP_ORIGIN.
