@@ -83,7 +83,7 @@ class AI:
         result = self.invoke(category, config.TEXT_MODEL, lambda: self.client.responses.parse(
             model=config.TEXT_MODEL, instructions=instructions+'\nRequired output language for player-visible strings: '+({'ru':'Russian (русский)','en':'English'}.get(context.get('language') or context.get('settings',{}).get('language'), 'as specified in the brief'))+'.',
             input=[{'role':'user','content':content}], text_format=model_type,
-            max_output_tokens=18000 if category=='blueprint' else 4000,
+            max_output_tokens={'blueprint':18000,'story_outline':12000,'story_world':7000,'story_script':9000}.get(category,4000),
             store=True),cache_key=cache_key)
         if result.output_parsed is None:
             raise InvalidContent('Model refused or returned incomplete structured data')

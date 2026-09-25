@@ -196,7 +196,7 @@ def test_generation_repairs_saved_draft_with_precise_feedback(game,blueprint):
                 assert 'f_lock.object_id' in context['repair_feedback'][0]
                 return blueprint
             return {'accepted':True,'issues':[],'routes':['letter then view','view then letter']}
-    ai=ControlledAI();worker.generate(j,ai)
+    ai=ControlledAI();worker.generate_legacy(j,ai)
     assert ai.calls==['blueprint','case_review','initial_state_review']
     assert db.one('SELECT status FROM jobs WHERE id=?',(j['id'],))['status']=='done'
 
@@ -215,7 +215,7 @@ def test_generation_normalizes_missing_reverse_exit_without_retry(game,blueprint
             garden=next(x for x in context['blueprint']['locations'] if x['id']=='l_garden')
             assert garden['exits']==['l_hall']
             return {'accepted':True,'issues':[],'alternative_routes':['letter then view','view then letter'],'reasoning_quality':'fair'}
-    ai=ControlledAI();worker.generate(j,ai)
+    ai=ControlledAI();worker.generate_legacy(j,ai)
     saved=db.one('SELECT * FROM jobs WHERE id=?',(j['id'],))
     assert ai.calls==['blueprint','case_review','initial_state_review']
     assert saved['status']=='done' and saved['repair_count']==0
@@ -239,7 +239,7 @@ def test_generation_reuses_saved_draft_when_new_validator_can_normalize_it(game,
             assert garden['exits']==['l_hall']
             assert context['blueprint']['objects'][2]['location']=='l_hall'
             return {'accepted':True,'issues':[],'alternative_routes':['letter then view','view then letter'],'reasoning_quality':'fair'}
-    ai=ControlledAI();worker.generate(j,ai)
+    ai=ControlledAI();worker.generate_legacy(j,ai)
     assert ai.calls==['case_review','initial_state_review']
     assert db.one('SELECT status FROM jobs WHERE id=?',(j['id'],))['status']=='done'
 
@@ -258,7 +258,7 @@ def test_structurally_valid_draft_still_rewrites_rejected_plot(game,blueprint):
                 assert context['previous_draft']==blueprint
                 return blueprint
             return {'accepted':True,'issues':[],'alternative_routes':[],'reasoning_quality':'fair'}
-    ai=ControlledAI();worker.generate(j,ai)
+    ai=ControlledAI();worker.generate_legacy(j,ai)
     assert ai.calls==['blueprint','case_review','initial_state_review']
 
 
@@ -381,7 +381,7 @@ def test_contradictory_initial_state_returns_to_generation_before_play(game,blue
             if category=='case_review':return {'accepted':True,'issues':[],'alternative_routes':[],'reasoning_quality':'fair'}
             assert context['opening_effects']==[{'container':'Стол','reveals':['Письмо']}]
             return {'accepted':False,'issues':['Missing item remains in supposedly empty container.']}
-    with pytest.raises(InvalidContent):worker.generate(j,ControlledAI())
+    with pytest.raises(InvalidContent):worker.generate_legacy(j,ControlledAI())
     saved=json.loads(db.one('SELECT checkpoint FROM jobs WHERE id=?',(j['id'],))['checkpoint'])
     assert saved['needs_rewrite'] and saved['draft']
     assert saved['feedback']==['Missing item remains in supposedly empty container.']
@@ -406,12 +406,12 @@ def test_reviewer_objections_are_verified_before_rewriting_case(game,blueprint,r
             return {'accepted':True,'issues':[]}
     ai=ControlledAI()
     if real_defect:
-        with pytest.raises(InvalidContent):worker.generate(job,ai)
+        with pytest.raises(InvalidContent):worker.generate_legacy(job,ai)
         checkpoint=json.loads(db.one('SELECT checkpoint FROM jobs WHERE id=?',(job['id'],))['checkpoint'])
         assert checkpoint['feedback']==['Essential evidence unreachable.']
         assert 'initial_state_review' not in ai.calls
     else:
-        worker.generate(job,ai)
+        worker.generate_legacy(job,ai)
         assert 'initial_state_review' in ai.calls
         assert db.one('SELECT status FROM jobs WHERE id=?',(job['id'],))['status']=='done'
 
@@ -432,7 +432,7 @@ def test_repeated_rejected_drafts_get_new_repair_context(game,blueprint):
             return bad
     ai=ControlledAI()
     for expected in range(3):
-        with pytest.raises(InvalidContent):worker.generate(job,ai)
+        with pytest.raises(InvalidContent):worker.generate_legacy(job,ai)
         job=db.one('SELECT * FROM jobs WHERE id=?',(job['id'],))
         assert json.loads(job['checkpoint'])['revision']==expected+1
     assert ai.revisions==[0,1,2]

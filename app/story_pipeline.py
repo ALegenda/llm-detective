@@ -1,0 +1,327 @@
+"""Story authoring separated from an executable, mechanically safe world compiler.
+
+The model writes causes and observations. Code owns IDs, containment, keys, tools,
+prerequisite ordering, travel and effects. No authored promise changes world state.
+"""
+import copy
+import json
+from collections import deque
+from typing import Literal
+from pydantic import Field, create_model
+from . import db, world
+from .ai import InvalidContent
+from .models import Model, Location, Thing, Check, Account, Blueprint
+from .generation import validate_blueprint
+
+VERSION = 2
+
+class Place(Model):
+    name: str
+    description: str
+    atmosphere: str
+    image_prompt: str
+    travel_minutes: int = Field(ge=1, le=15)
+
+class CastMember(Model):
+    name: str
+    role: str
+    appearance: str
+    personality: str
+    interests: str
+    location_index: int = Field(ge=0, le=4)
+    knowledge: list[str]
+    innocent_secret: str
+
+class Clue(Model):
+    source_name: str
+    source_surface: str
+    source_image_prompt: str
+    location_index: int = Field(ge=0, le=4)
+    portable: bool
+    action: str
+    observation: str
+    significance: str
+    is_missing_item: bool
+
+class Conclusion(Model):
+    description: str
+    clue_indices: list[int] = Field(min_length=2, max_length=5)
+
+class MysteryOutline(Model):
+    title: str
+    subtitle: str
+    setting_rules: str
+    visual_style: str
+    start_time: str
+    public_incident: str
+    event: str
+    culprit_indices: list[int] = Field(min_length=1, max_length=3)
+    method: str
+    motive: str
+    timeline: list[str] = Field(min_length=4, max_length=10)
+    explanation: str
+    dramatic_question: str
+    fair_reversal: str
+    places: list[Place] = Field(min_length=3, max_length=5)
+    cast: list[CastMember] = Field(min_length=3, max_length=5)
+    clues: list[Clue] = Field(min_length=7, max_length=16)
+    conclusions: list[Conclusion] = Field(min_length=3, max_length=5)
+
+class AccessRecipe(Model):
+    access: Literal['exposed', 'container', 'locked_container']
+    container_name: str
+    container_surface: str
+    container_image_prompt: str
+    key_name: str
+    key_surface: str
+    key_image_prompt: str
+    key_location: str
+    tool_name: str
+    tool_surface: str
+    tool_image_prompt: str
+    tool_location: str
+    requires: list[str]
+    minutes: int = Field(ge=1, le=10)
+
+class ScriptAccount(Model):
+    topic: str
+    claim: str
+    private_context: str
+    requires_evidence: list[str]
+    emotion: Literal['calm','warm','guarded','anxious','irritated','sad','surprised']
+
+class CharacterScript(Model):
+    public_context: str
+    status: Literal['witness','person_of_interest','contact']
+    accounts: list[ScriptAccount] = Field(min_length=3, max_length=5)
+
+class Script(Model):
+    introduction: str
+    objective: str
+    known_facts: list[str] = Field(min_length=2, max_length=6)
+    hints: list[str] = Field(min_length=3, max_length=3)
+
+class ReaderSolution(Model):
+    culprits: list[str]
+    method: str
+    motive: str
+    reasoning: str
+    supporting_evidence: list[str]
+    unresolved_ambiguities: list[str]
+
+class RepairIssue(Model):
+    stage: Literal['outline', 'world', 'script']
+    target: str
+    contradiction: str
+    correction: str
+
+class StoryAudit(Model):
+    issues: list[RepairIssue]
+    strengths: list[str]
+
+OUTLINE_PROMPT = '''Design a compelling fair mystery as CAUSES AND EVIDENCE, not game code. Follow the user's theme materially: local geography/history/occupation must affect method and evidence. All player-facing text in settings.language. Short: 3 places, 3 people, 7-9 clues; standard: 4/4/10-12; long: 5/5/13-16. Place 0 is a hub connected to every other place; all places accessible from start. No other place-to-place direct exits. Cast stays available, no timed escape or mandatory confession.
+First establish a coherent past: who did what, how, when, why, and where any missing object is NOW. Then derive physical evidence from that past. Each clue has one DIFFERENT physical source: a document, trace, device, recovered object or material experiment. Clues have explicit readable times/names/physical details. observation contains ONLY what can actually be perceived/read/tested, not omniscient motives, route deductions or declaring guilt. significance is PRIVATE design reasoning. action is a concise natural investigation label, no hidden finding or solution spoilers. source_surface is exterior only, never hidden writing or current holder/location; source name/appearance must not reveal a hidden conclusion. Locations are present AFTER the incident. Missing object is a portable clue at its true CURRENT hiding place, marked is_missing_item; never in its supposedly empty old container. Recovery is allowed early and does not itself solve the case.
+Every conclusion (identity, causal method and evidenced motive, plus at most 2 necessary details) must have >=2 DISTINCT independent material sources. Use zero-based clue_indices. Motive must be inferable from available records/actions, never only private_context or confession. Every decisive assertion has a support route. An alternative suspect must have a plausible innocent secret that explains their misleading conduct. fair_reversal must be earned by evidence, not information withheld from the player. Avoid generic identical guilty/innocent templates. Difficulty controls inference depth, not keys or clue count. Include a meaningful experiment or comparison. Put prerequisite observations earlier than comparisons in clue order. Do not require consumable/destructive actions or unsupported physical effects: a check observes only; opening/taking are separate engine actions.
+Cast knowledge contains concrete personal memories and beliefs ONLY, no global omniscience; indicate dishonest beliefs/claims and what the person knows of them. appearance fixes gender and identity. public_incident explains the assignment without leaking private facts. If repairing, preserve valid facts and the causal truth; fix the specified source/contradiction, not the whole story. Never resubmit an unchanged rejected stage.'''
+
+WORLD_PROMPT = '''Fit the fixed outline to the provided safe engine recipes. Do NOT change the story, sources, locations or observations. Return one recipe per f_N field. exposed means the source is visible in its room. container places source inside a newly created, initially closed, unlocked container. locked_container additionally creates a portable key, initially visible in key_location, outside ALL containers. tool_name creates a portable tool initially visible at tool_location. Use tools only if the authored experiment physically needs one. Empty ALL unused container/key/tool strings; key_location/tool_location empty if unused. Give each created object a unique natural name. No offscreen NPC-held keys, gifts, invented passwords, concealed roots or custom effects. Choose at most 2 containers and at most 1 locked container for a short case. The source itself remains exactly as authored; do not wrap an architectural trace in a box. Container surface describes only exterior, not contents. Player opening always reveals the source immediately; choose access consistent with its actual hiding place. Missing item must not be in its ORIGINAL empty container.
+requires may ONLY reference earlier f_N observations offered by the schema, and only for an actual comparison. Ordinary reading needs no prior fact. Every room/key/tool is available from start; depth comes from deductions. minutes is actual investigation time. No check opens, moves, gives or changes objects; such mechanics are explicit player actions. Follow repair feedback with minimal changes to this stage.'''
+
+SCRIPT_PROMPT = '''Write the player briefing and NPC testimony for the FIXED mystery and compiled world. Do not change causal truth, physical placements or evidence. Introduction: complete atmospheric 2-3 paragraphs stating concrete incident/discovery/time/assignment, no hidden culprit or undiscovered clues. objective identifies questions to solve; known_facts only public opening facts. Public participant context explains relevance without guilt leakage.
+Each NPC gets 3-5 concise topic accounts, direct first-person speech, grammatical gender from appearance, grounded in their own knowledge. Each claim answers its topic, not unrelated exposition. Innocent secrets and plausible lies have clear personal reasons. requires_evidence uses actual f_N ids only for secrets/confrontations; normal background/time/alibi must be discussable immediately. Testimony can guide/corroborate/lie; all necessary proof already has material routes. Talking NEVER transfers a key/item, opens anything, or changes physical state. Never claim such an effect. Hints: first broad direction, second comparison, final more concrete, none names culprit. Follow repair feedback with minimal corrections.'''
+
+AUDIT_PROMPT = '''Audit narrative consistency and fair inference, not engine mechanics. A real reducer replay certificate already proves the compiled access graph, item recovery and clue acquisition; do not demand extra locks, a delayed discovery, prescribed investigation order or a confession. Early recovery at the correct CURRENT hiding place is legal. The outline is authoritative past; compiled objects are actual present; opening exposes children immediately. NPC claims can intentionally lie, while objective observations cannot contradict truth. Check concrete contradictions between briefing/actual present/observation/truth; missing evidence for a required causal conclusion; omniscient NPC knowledge; premature culprit disclosure; or incomplete sentences. Compare independent_reader (which never saw truth) with intended answer: ambiguous identity/motive requires better observable support. Different wording or reasonable inference is fine. Do not reject for stylistic preference. Return only demonstrated blocking issues, with the responsible stage and exact source/person identifier plus a minimal correction. outline owns objective facts, sources and knowledge; world owns access/containers/tools; script owns briefing/accounts/hints. strengths briefly explains what makes this story interesting and theme-specific. Empty issues means publishable. Never label a source contradiction just because a lie conflicts with truth.'''
+
+
+def validate_outline(raw, settings):
+    o=MysteryOutline.model_validate(raw).model_dump()
+    errors=[]
+    count={'short':3,'standard':4,'long':5}.get(settings['duration'],4)
+    if len(o['places'])!=count or len(o['cast'])!=count:errors.append(f'Use exactly {count} places and people')
+    if not o['culprit_indices'] or any(i<0 or i>=len(o['cast']) for i in o['culprit_indices']):errors.append('culprit_indices outside cast')
+    if len(set(o['culprit_indices']))!=len(o['culprit_indices']):errors.append('Duplicate culprit')
+    for group in ['cast','clues']:
+        for i,item in enumerate(o[group]):
+            if item['location_index']>=len(o['places']):errors.append(f'{group}[{i}].location_index outside places')
+    names=[c['source_name'].strip().casefold() for c in o['clues']]
+    if len(names)!=len(set(names)):errors.append('Each clue must use a distinct named material source')
+    for i,c in enumerate(o['conclusions']):
+        refs=c['clue_indices']
+        if len(set(refs))<2 or any(j<0 or j>=len(o['clues']) for j in refs):errors.append(f'conclusions[{i}] needs >=2 distinct existing zero-based clue_indices')
+    for i,c in enumerate(o['clues']):
+        if c['is_missing_item'] and not c['portable']:errors.append(f'clues[{i}] missing item must be physically recoverable (portable)')
+    import re
+    if not re.fullmatch(r'(?:[01]\d|2[0-3]):[0-5]\d',o['start_time']):errors.append('start_time must be HH:MM')
+    if errors:raise ValueError('; '.join(errors))
+    return o
+
+
+def world_schema(o):
+    rooms=tuple(f'l_{i+1}' for i in range(len(o['places'])))
+    fields={}
+    for i in range(len(o['clues'])):
+        prior=tuple(f'f_{j+1}' for j in range(i))
+        recipe=create_model(f'AccessForClue{i+1}',__base__=AccessRecipe,
+            key_location=(Literal.__getitem__(('',)+rooms),...),tool_location=(Literal.__getitem__(('',)+rooms),...),
+            requires=(list[Literal.__getitem__(prior)] if prior else list[str],Field(**({} if prior else {'max_length':0}))))
+        fields[f'f_{i+1}']=(recipe,...)
+    return create_model('CompiledAccessPlan',__base__=Model,**fields)
+
+
+def script_schema(o):
+    evidence=tuple(f'f_{i+1}' for i in range(len(o['clues'])))
+    account=create_model('GroundedScriptAccount',__base__=ScriptAccount,requires_evidence=(list[Literal.__getitem__(evidence)],...))
+    character=create_model('GroundedCharacterScript',__base__=CharacterScript,accounts=(list[account],Field(min_length=3,max_length=5)))
+    return create_model('CaseScript',__base__=Script,**{f'n_{i+1}':(character,...) for i in range(len(o['cast']))})
+
+
+def compile_world(o, raw_plan, script=None):
+    plan=world_schema(o).model_validate(raw_plan).model_dump()
+    objects=[];checks=[]
+    def thing(oid,name,surface,prompt,location,**kwargs):
+        objects.append(Thing(id=oid,name=name,surface=surface,image_prompt=prompt,location=location,
+            portable=False,movable=False,openable=False,visible=True,container='',locked=False,key_id='').model_dump()|kwargs)
+    for i,c in enumerate(o['clues']):
+        fid=f'f_{i+1}';oid=f'o_{i+1}';r=plan[fid];room=f"l_{c['location_index']+1}"
+        parent='';tools=[]
+        if r['access']!='exposed':
+            if not r['container_name'].strip():raise ValueError(fid+' requires named container')
+            parent=f'o_box_{i+1}';key=''
+            if r['access']=='locked_container':
+                if not r['key_name'].strip() or not r['key_location']:raise ValueError(fid+' requires a named key and reachable key_location')
+                key=f'o_key_{i+1}'
+                thing(key,r['key_name'],r['key_surface'],r['key_image_prompt'],r['key_location'],portable=True,movable=True)
+            thing(parent,r['container_name'],r['container_surface'],r['container_image_prompt'],room,openable=True,locked=bool(key),key_id=key)
+        if r['tool_name'].strip():
+            if not r['tool_location']:raise ValueError(fid+' needs tool_location')
+            tool=f'o_tool_{i+1}';tools=[tool]
+            thing(tool,r['tool_name'],r['tool_surface'],r['tool_image_prompt'],r['tool_location'],portable=True,movable=True)
+        thing(oid,c['source_name'],c['source_surface'],c['source_image_prompt'],room,portable=c['portable'],movable=c['portable'],container=parent,visible=not parent)
+        checks.append(Check(id=fid,object_id=oid,intent=c['action'],result=c['observation'],requires_facts=r['requires'],requires_tools=tools,requires_open=parent,reveals_objects=[],minutes=r['minutes'],essential=True,opens_object=False).model_dump())
+    names=[x['name'].strip().casefold() for x in objects]
+    if len(names)!=len(set(names)):raise ValueError('World recipe creates duplicate physical object names; use distinct containers, keys and tools')
+    locations=[]
+    for i,p in enumerate(o['places']):
+        exits=[f'l_{j+1}' for j in range(1,len(o['places']))] if i==0 else ['l_1']
+        locations.append(Location(id=f'l_{i+1}',exits=exits,**p).model_dump())
+    people=[]
+    for i,n in enumerate(o['cast']):
+        pid=f'n_{i+1}';accounts=[]
+        if script:
+            for j,a in enumerate(script[pid]['accounts']):accounts.append(Account(id=f's_{i+1}_{j+1}',**a).model_dump())
+        people.append({k:n[k] for k in ['name','role','appearance','personality','interests','knowledge']}|{'id':pid,'location':f"l_{n['location_index']+1}",'accounts':accounts})
+    truth={k:o[k] for k in ['event','motive','method','timeline','explanation']}
+    truth.update(culprits=[f'n_{i+1}' for i in o['culprit_indices']],innocent_secrets=[n['innocent_secret'] for n in o['cast'] if n['innocent_secret']],criteria=[{'description':c['description'],'evidence_ids':[f'f_{i+1}' for i in c['clue_indices']]} for c in o['conclusions']])
+    briefing=None
+    if script:
+        briefing={'objective':script['objective'],'known_facts':script['known_facts'],'participants':[{'person_id':p['id'],'status':script[p['id']]['status'],'context':script[p['id']]['public_context']} for p in people]}
+    b={k:o[k] for k in ['title','subtitle','setting_rules','visual_style','start_time']}
+    b.update(start_location='l_1',introduction=script['introduction'] if script else o['public_incident'],briefing=briefing,locations=locations,objects=objects,checks=checks,people=people,reactions=[],truth=truth,hints=script['hints'] if script else [])
+    return validate_blueprint(b)
+
+
+def exercise_world(b, required_items=(), reverse=False):
+    """Replay real engine operations; certificate contains no AI 'playable' verdict."""
+    s=world.initial(b);world.observe_people(b,s);trace=[]
+    def act(kind,target='',destination='',check_id=''):
+        nonlocal s
+        step={'kind':kind,'target':target,'destination':destination,'check_id':check_id,'topic':'','minutes':0,'explanation':''}
+        before=copy.deepcopy(s)
+        s,result,_=world.reduce(b,s,[step],{'evidence':[],'text':''})
+        if before==s:raise ValueError('Engine refused certificate action: '+kind+' '+(target or destination))
+        trace.append(step)
+    def travel(dest):
+        if s['location']==dest:return
+        queue=deque([(s['location'],[])]);seen=set()
+        while queue:
+            room,path=queue.popleft()
+            if room==dest:
+                for place in path:act('travel',destination=place)
+                return
+            if room in seen:continue
+            seen.add(room)
+            queue.extend((n,path+[n]) for n in world.index(b,'locations')[room]['exits'])
+        raise ValueError('No engine route to '+dest)
+    order=list(b['locations']);order=order[::-1] if reverse else order
+    # Fixed point over legal actions in actual state, allowing keys/tools in later rooms.
+    for _ in range(len(b['objects'])+len(b['checks'])+1):
+        progress=(len(s['inventory']),len(s['evidence']),sum(v['open'] for v in s['objects'].values()))
+        for room in order:
+            travel(room['id'])
+            for o in b['objects'][::-1] if reverse else b['objects']:
+                if not world.visible(o,s):continue
+                os=s['objects'][o['id']]
+                if o['portable'] and o['id'] not in s['inventory']:act('take',o['id'])
+                if world.openable(b,o) and not os['open'] and (not os['locked'] or o['key_id'] in s['inventory']):act('open',o['id'])
+                for check in world.available_checks(b,s,o['id']):
+                    if not check['done']:act('check',o['id'],check_id=check['id'])
+        after=(len(s['inventory']),len(s['evidence']),sum(v['open'] for v in s['objects'].values()))
+        if after==progress:break
+    known={e['id'] for e in s['evidence']}
+    missing={c['id'] for c in b['checks'] if c['essential']}-known
+    if missing:raise ValueError('Engine replay cannot obtain '+','.join(sorted(missing)))
+    if set(required_items)-set(s['inventory']):raise ValueError('Engine replay cannot recover required items')
+    for criterion in b['truth']['criteria']:
+        if len(set(criterion['evidence_ids'])&known)<2:raise ValueError('Criterion lacks two acquired material sources')
+    return {'actions':trace,'acquired':sorted(known),'recovered':sorted(set(required_items)&set(s['inventory'])),'minutes':s['minute']}
+
+
+def reader_schema(b):
+    return create_model('BlindReading',__base__=ReaderSolution,
+        culprits=(list[Literal.__getitem__(tuple(p['id'] for p in b['people']))],Field(min_length=1)),
+        supporting_evidence=(list[Literal.__getitem__(tuple(c['id'] for c in b['checks']))],Field(min_length=2)))
+
+
+def build(job, ai, settings):
+    cp=json.loads(job['checkpoint']) if job['checkpoint'] else {}
+    if cp.get('pipeline_version')!=VERSION:cp={'pipeline_version':VERSION,'revision':0,'feedback':{}}
+    def save(stage):
+        cp['stage']=stage;db.save_checkpoint(job,cp)
+    def reject(stage,feedback):
+        cp.setdefault('feedback',{})[stage]=feedback
+        cp['revision']+=1
+        cp.setdefault('rejections',{})[stage]=cp.get('rejections',{}).get(stage,0)+1
+        # A repair reruns its stage and dependants, never unrelated finished work.
+        dependencies={'outline':['outline','world','script','blueprint','certificate','reader','audit'], 'world':['world','script','blueprint','certificate','reader','audit'], 'script':['script','blueprint','reader','audit']}
+        cp.setdefault('drafts',{})[stage]=cp.get(stage)
+        for key in dependencies[stage]:cp.pop(key,None)
+        save(stage)
+        raise InvalidContent(stage+': '+'; '.join(feedback))
+    def stage_call(stage,category,prompt,context,schema):
+        if stage not in cp:
+            save(stage)
+            cp[stage]=ai.structured(category,prompt,context|{'settings':settings,'repair_feedback':cp.get('feedback',{}).get(stage,[]),'previous_stage_draft':cp.get('drafts',{}).get(stage),'repair_revision':cp['revision']},schema)
+            save(stage)
+        return cp[stage]
+    outline=stage_call('outline','story_outline',OUTLINE_PROMPT,{},MysteryOutline)
+    try:outline=validate_outline(outline,settings)
+    except ValueError as e:reject('outline',[str(e)])
+    plan=stage_call('world','story_world',WORLD_PROMPT,{'outline':outline},world_schema(outline))
+    try:base=compile_world(outline,plan)
+    except ValueError as e:reject('world',[str(e)])
+    required=[f'o_{i+1}' for i,c in enumerate(outline['clues']) if c['is_missing_item']]
+    if 'certificate' not in cp:
+        try:cp['certificate']={'forward':exercise_world(base,required),'reverse':exercise_world(base,required,reverse=True)}
+        except ValueError as e:reject('world',[str(e)])
+        save('proof')
+    script=stage_call('script','story_script',SCRIPT_PROMPT,{'outline':outline,'compiled_world':base},script_schema(outline))
+    try:
+        script=script_schema(outline).model_validate(script).model_dump()
+        b=compile_world(outline,plan,script)
+    except ValueError as e:reject('script',[str(e)])
+    cp['blueprint']=b;save('reading')
+    reader=stage_call('reader','story_reader','Solve this mystery from the player-obtainable MATERIAL evidence ONLY. You are a critical reader, not an author. No confession or private knowledge is supplied. Identify who/how/why with concrete cited material evidence. If several explanations fit equally well, state the ambiguity honestly. Do not invent unseen facts. All supplied physical observations have actually been acquired in a legal engine replay.',
+        {'briefing':b['introduction'],'assignment':b['briefing'],'people':[{k:p[k] for k in ['id','name','role']} for p in b['people']], 'observations':[{'id':c['id'],'source':world.index(b,'objects')[c['object_id']]['name'],'text':c['result']} for c in b['checks']]},reader_schema(b))
+    audit=stage_call('audit','story_audit',AUDIT_PROMPT,{'outline':outline,'blueprint':b,'independent_reader':reader,'mechanical_proof':{'orders_tested':2,'all_material_clues_acquired':True,'required_items_recovered':True}},StoryAudit)
+    issues=audit['issues']
+    if set(reader['culprits'])!=set(b['truth']['culprits']) and not any(i['stage']=='outline' for i in issues):
+        issues=issues+[{'stage':'outline','target':'identity evidence','contradiction':'Independent reader selected '+','.join(reader['culprits'])+' from obtainable evidence, expected '+','.join(b['truth']['culprits']),'correction':'Clarify independent material evidence distinguishing the actual culprit; preserve causal truth.'}]
+    if issues:
+        stage=next(s for s in ['outline','world','script'] if any(i['stage']==s for i in issues))
+        # Preserve other stage feedback for subsequent repairs.
+        for target in ['outline','world','script']:
+            feedback=[i['target']+': '+i['contradiction']+' Correction: '+i['correction'] for i in issues if i['stage']==target]
+            if feedback:cp.setdefault('feedback',{})[target]=feedback
+        reject(stage,cp['feedback'][stage])
+    save('ready')
+    return b,{'accepted':True,'pipeline_version':VERSION,'strengths':audit['strengths'],'mechanical_proof':{'orders_tested':2,'clues_acquired':len(b['checks']),'recovery_verified':len(required)},'independent_reading_agrees':True}

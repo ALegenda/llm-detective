@@ -28,6 +28,16 @@ def asset_task(con,cid,kind,entity,variant='base',priority=50):
 
 
 def generate(job, ai):
+    checkpoint=json.loads(job['checkpoint']) if job['checkpoint'] else {}
+    # Existing in-progress v1 cases retain their recovery path; new work uses v2.
+    if checkpoint and not checkpoint.get('pipeline_version'):
+        return generate_legacy(job,ai)
+    from .story_pipeline import build
+    blueprint,review=build(job,ai,json.loads(ai.case['settings']))
+    publish_case(job,ai.case,blueprint,review)
+
+
+def generate_legacy(job, ai):
     case=ai.case
     settings=json.loads(case['settings'])
     checkpoint=json.loads(job['checkpoint']) if job['checkpoint'] else {}
@@ -79,13 +89,17 @@ def generate(job, ai):
         save({'draft':b,'feedback':state_review['issues'],'needs_rewrite':True},rejected=True)
         raise InvalidContent('; '.join(state_review['issues']))
     save({'blueprint':b,'review':review,'state_review':state_review})
+    publish_case(job,case,b,review)
+
+
+def publish_case(job,case,b,review):
     with db.transaction() as con:
         if not db.fenced(con,job):return
         # Blueprint is never rewritten after becoming playable.
         if con.execute('SELECT status FROM cases WHERE id=?',(case['id'],)).fetchone()['status']=='ready':
             complete(con,job);return
         now=time.time()
-        b['_meta']={'schema_version':1,'prompt_version':config.PROMPT_VERSION,'text_model':config.TEXT_MODEL,'image_model':config.IMAGE_MODEL,'truth_hash':db.digest(b['truth'])}
+        b['_meta']={'schema_version':1,'prompt_version':config.PROMPT_VERSION,'text_model':config.TEXT_MODEL,'image_model':config.IMAGE_MODEL,'truth_hash':db.digest(b['truth']),'generation_version':review.get('pipeline_version',1)}
         con.execute("UPDATE cases SET blueprint=?,review=?,status='ready',updated=? WHERE id=?",(db.encode(b),db.encode(review),now,case['id']))
         aid=db.uid(); state=world.initial(b); world.observe_people(b,state)
         con.execute('INSERT INTO attempts(id,case_id,user_id,state,initial_state,created,updated) VALUES(?,?,?,?,?,?,?)',(aid,case['id'],case['user_id'],db.encode(state),db.encode(state),now,now))
@@ -301,7 +315,13 @@ def asset_job(job,ai):
 def fail_job(job,error):
     invalid=isinstance(error,InvalidContent)
     code='invalid_content' if invalid else getattr(error,'code','internal_error')
-    retry=(invalid and job['repair_count']<2) or (isinstance(error,ProviderFailure) and error.retryable and job['attempts']<3)
+    content_retry=invalid and job['repair_count']<2
+    if invalid and job['kind']=='generate':
+        latest=db.one('SELECT checkpoint FROM jobs WHERE id=?',(job['id'],))
+        cp=json.loads(latest['checkpoint']) if latest and latest['checkpoint'] else {}
+        if cp.get('pipeline_version')==2 and cp.get('revision',0):
+            content_retry=job['repair_count']<4 and cp['revision']<=4 and cp.get('rejections',{}).get(cp.get('stage'),0)<=2
+    retry=content_retry or (isinstance(error,ProviderFailure) and error.retryable and job['attempts']<3)
     if code=='waiting_for_base':retry=job['attempts']<12
     delay=max(getattr(error,'retry_after',0),min(90,2**job['attempts']+random.uniform(0,2)))
     with db.transaction() as con:

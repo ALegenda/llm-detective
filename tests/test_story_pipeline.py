@@ -1,0 +1,166 @@
+import copy
+import json
+import random
+import pytest
+from pydantic import ValidationError
+from app import db, worker, world
+from app.ai import InvalidContent, ProviderFailure
+from app.story_pipeline import (validate_outline,world_schema,script_schema,compile_world,exercise_world,build)
+from test_reliability import queue_job
+
+
+@pytest.fixture
+def outline():
+    return {
+        'title':'Письмо перед отплытием','subtitle':'Портовая история','setting_rules':'Реализм','visual_style':'Editorial ink','start_time':'09:00',
+        'public_incident':'Исчезло письмо. Три свидетеля ждут в порту.', 'event':'Исчезновение письма', 'culprit_indices':[0],
+        'method':'Письмо переложено в коробку','motive':'Скрыть перенос встречи','timeline':['08:00 письмо получено','08:10 встреча перенесена','08:20 письмо скрыто','08:30 обнаружена пропажа'],
+        'explanation':'Ирина скрыла письмо с новым временем встречи.','dramatic_question':'Почему письмо исчезло?','fair_reversal':'Опоздание оказалось намеренным.',
+        'places':[{'name':name,'description':name,'atmosphere':'Туман','image_prompt':'Empty architecture','travel_minutes':2} for name in ['Контора','Причал','Мастерская']],
+        'cast':[{'name':name,'role':'Свидетель','appearance':'Взрослый человек','personality':'Сдержанный','interests':'Работа','location_index':i,'knowledge':['Встреча в 18:00.'],'innocent_secret':''} for i,name in enumerate(['Ирина','Лев','Анна'])],
+        'clues':[{'source_name':'Источник '+str(i),'source_surface':'Закрытый документ '+str(i),'source_image_prompt':'Closed paper','location_index':i%3,'portable':i==6,'action':'Прочитать источник '+str(i),'observation':'На документе '+str(i)+' указана встреча в 18:00.','significance':'Устанавливает время','is_missing_item':i==6} for i in range(7)],
+        'conclusions':[{'description':'Критерий '+str(i),'clue_indices':[i,i+1]} for i in range(3)]}
+
+
+def recipe(**changes):
+    return {'access':'exposed','container_name':'','container_surface':'','container_image_prompt':'','key_name':'','key_surface':'','key_image_prompt':'','key_location':'','tool_name':'','tool_surface':'','tool_image_prompt':'','tool_location':'','requires':[],'minutes':2}|changes
+
+
+def make_plan():
+    plan={f'f_{i+1}':recipe() for i in range(7)}
+    plan['f_1']=recipe(access='locked_container',container_name='Сейф',container_surface='Стальной сейф',container_image_prompt='Closed safe',key_name='Ключ от сейфа',key_surface='Латунный ключ',key_image_prompt='Key',key_location='l_3')
+    plan['f_4']=recipe(requires=['f_1','f_3'],tool_name='Лупа',tool_surface='Лупа',tool_image_prompt='Lens',tool_location='l_2')
+    plan['f_7']=recipe(access='container',container_name='Коробка',container_surface='Жестяная коробка',container_image_prompt='Closed box',requires=['f_4'])
+    return plan
+
+
+def make_script():
+    s={'introduction':'Письмо исчезло из конторы. Выясните обстоятельства.','objective':'Найти письмо и объяснить исчезновение.','known_facts':['Письмо исчезло.','В конторе три свидетеля.'],'hints':['Осмотрите контору.','Сравните время.','Сопоставьте документы.']}
+    for i in range(3):
+        s[f'n_{i+1}']={'public_context':'Работает в порту.','status':'witness','accounts':[{'topic':str(j),'claim':'Я видела письмо.','private_context':'Вспоминает письмо','requires_evidence':['f_1'] if j==2 else [],'emotion':'calm'} for j in range(3)]}
+    return s
+
+
+SETTINGS={'theme':'Портовая история','language':'ru','duration':'short','difficulty':'medium'}
+
+
+def test_compiler_replay_obtains_all_clues_and_recovers_item_in_both_orders(outline):
+    b=compile_world(validate_outline(outline,SETTINGS),make_plan(),make_script())
+    for reverse in [False,True]:
+        proof=exercise_world(b,['o_7'],reverse)
+        assert set(c['id'] for c in b['checks'])<=set(proof['acquired'])
+        assert proof['recovered']==['o_7']
+        assert any(s['kind']=='open' and s['target']=='o_box_1' for s in proof['actions'])
+    assert b['objects'][0]['container']=='' # compiler-created key never inside its safe
+    assert all(c['opens_object'] is False and c['reveals_objects']==[] for c in b['checks'])
+
+
+def test_schema_prevents_forward_dependencies_unknown_rooms_and_unknown_dialogue_evidence(outline):
+    plan=make_plan();plan['f_1']['requires']=['f_7']
+    with pytest.raises(ValidationError):world_schema(outline).model_validate(plan)
+    plan=make_plan();plan['f_4']['requires']=['f_7']
+    with pytest.raises(ValidationError):world_schema(outline).model_validate(plan)
+    plan=make_plan();plan['f_1']['key_location']='l_unknown'
+    with pytest.raises(ValidationError):world_schema(outline).model_validate(plan)
+    s=make_script();s['n_1']['accounts'][0]['requires_evidence']=['s_unavailable']
+    with pytest.raises(ValidationError):script_schema(outline).model_validate(s)
+
+
+def test_outline_requires_independent_existing_material_support(outline):
+    outline['conclusions'][0]['clue_indices']=[0,0]
+    with pytest.raises(ValueError,match='distinct'):validate_outline(outline,SETTINGS)
+
+
+def test_certificate_detects_broken_runtime_state_instead_of_trusting_graph(outline):
+    b=compile_world(outline,make_plan())
+    key=next(o for o in b['objects'] if o['id']=='o_key_1')
+    key.update(container='o_box_1',location='l_1',visible=False)
+    with pytest.raises(ValueError,match='cannot obtain'):exercise_world(b,['o_7'])
+
+
+def test_compiled_recipe_combinations_are_executable(outline):
+    rng=random.Random(271828)
+    for _ in range(35):
+        plan={}
+        for i in range(7):
+            access=rng.choice(['exposed','container','locked_container'])
+            plan[f'f_{i+1}']=recipe(access=access,container_name=f'Контейнер {i}',container_surface='Закрыт',container_image_prompt='Box',key_name=f'Ключ {i}',key_surface='Ключ',key_image_prompt='Key',key_location=f'l_{rng.randrange(3)+1}',requires=[f'f_{j+1}' for j in range(i) if rng.random()<.2])
+        b=compile_world(outline,plan)
+        assert exercise_world(b,['o_7'],bool(rng.randrange(2)))['recovered']==['o_7']
+
+
+class FakeAuthor:
+    def __init__(self,outline):
+        self.case=db.one("SELECT * FROM cases WHERE id='c1'")
+        self.outline=outline;self.calls=[];self.contexts={};self.fail_once=None;self.audit_issues=[]
+    def structured(self,category,prompt,context,schema):
+        self.calls.append(category);self.contexts[category]=context
+        if self.fail_once==category:
+            self.fail_once=None
+            raise ProviderFailure('provider_connection_unknown',True)
+        result={'story_outline':self.outline,'story_world':make_plan(),'story_script':make_script(),
+                'story_reader':{'culprits':['n_1'],'method':'Переложено','motive':'Скрыть время','reasoning':'Документы сходятся','supporting_evidence':['f_1','f_2'],'unresolved_ambiguities':[]},
+                'story_audit':{'issues':self.audit_issues,'strengths':['Материальные маршруты']}}[category]
+        return schema.model_validate(result).model_dump()
+
+
+def test_pipeline_reader_never_receives_truth_and_resume_reuses_finished_stages(game,outline):
+    j=queue_job('generate');ai=FakeAuthor(outline);ai.fail_once='story_script'
+    with pytest.raises(ProviderFailure):build(j,ai,SETTINGS)
+    j=db.one('SELECT * FROM jobs WHERE id=?',(j['id'],))
+    b,review=build(j,ai,SETTINGS)
+    assert ai.calls.count('story_outline')==1 and ai.calls.count('story_world')==1
+    reader=ai.contexts['story_reader']
+    assert not any(key in reader for key in ['truth','outline','compiled_world'])
+    assert 'private_context' not in json.dumps(reader)
+    assert 'knowledge' not in json.dumps(reader)
+    assert 'testimony' not in reader
+    assert review['mechanical_proof']['orders_tested']==2
+    assert b['truth']['culprits']==['n_1']
+
+
+def test_script_repair_preserves_outline_world_and_mechanical_certificate(game,outline):
+    j=queue_job('generate');ai=FakeAuthor(outline)
+    ai.audit_issues=[{'stage':'script','target':'introduction','contradiction':'Unfinished sentence','correction':'Complete the sentence'}]
+    with pytest.raises(InvalidContent):build(j,ai,SETTINGS)
+    j=db.one('SELECT * FROM jobs WHERE id=?',(j['id'],));cp=json.loads(j['checkpoint'])
+    assert all(key in cp for key in ['outline','world','certificate'])
+    assert not any(key in cp for key in ['script','reader','blueprint','audit'])
+    ai.audit_issues=[]
+    build(j,ai,SETTINGS)
+    assert ai.calls.count('story_outline')==1 and ai.calls.count('story_world')==1
+    assert ai.calls.count('story_script')==2
+    assert ai.contexts['story_script']['repair_feedback']
+
+
+def test_worker_publishes_only_certified_new_pipeline_and_keeps_proof_private(client,game,outline):
+    with db.transaction() as con:con.execute("UPDATE cases SET status='writing',blueprint=NULL WHERE id='c1'")
+    j=queue_job('generate');ai=FakeAuthor(outline)
+    worker.generate(j,ai)
+    row=db.one("SELECT * FROM cases WHERE id='c1'")
+    assert row['status']=='ready'
+    assert json.loads(row['blueprint'])['_meta']['generation_version']==2
+    assert json.loads(row['review'])['mechanical_proof']['clues_acquired']==7
+    public=client.get('/api/cases/c1').json()
+    assert 'certificate' not in public and 'outline' not in public and 'truth' not in public
+    assert public['generation_version']==2 and public['stage']=='ready'
+
+
+def test_wrong_independent_solution_cannot_publish_even_if_auditor_misses_it(game,outline):
+    j=queue_job('generate');ai=FakeAuthor(outline);original=ai.structured
+    def wrong(category,prompt,context,schema):
+        result=original(category,prompt,context,schema)
+        if category=='story_reader':result['culprits']=['n_2']
+        return result
+    ai.structured=wrong
+    with pytest.raises(InvalidContent,match='Independent reader'):build(j,ai,SETTINGS)
+    cp=json.loads(db.one('SELECT checkpoint FROM jobs WHERE id=?',(j['id'],))['checkpoint'])
+    assert cp['stage']=='outline' and 'blueprint' not in cp
+
+
+@pytest.mark.parametrize('revision,stage_rejections,retry',[(1,1,True),(2,2,True),(3,3,False),(4,1,True),(5,1,False)])
+def test_new_pipeline_repair_budget_is_per_stage_and_globally_bounded(game,revision,stage_rejections,retry):
+    j=queue_job('generate')
+    db.save_checkpoint(j,{'pipeline_version':2,'revision':revision,'stage':'world','rejections':{'world':stage_rejections}})
+    worker.fail_job(j,InvalidContent('test'))
+    assert db.one('SELECT status FROM jobs WHERE id=?',(j['id'],))['status']==('retry' if retry else 'failed')
