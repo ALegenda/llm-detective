@@ -387,3 +387,30 @@ def test_contradictory_initial_state_returns_to_generation_before_play(game,blue
     assert saved['feedback']==['Missing item remains in supposedly empty container.']
     assert db.one("SELECT status FROM cases WHERE id='c1'")['status']=='writing'
     assert len(db.all_rows('SELECT * FROM attempts'))==1
+
+
+@pytest.mark.parametrize('real_defect',[False,True])
+def test_reviewer_objections_are_verified_before_rewriting_case(game,blueprint,real_defect):
+    job=queue_job('generate')
+    class ControlledAI:
+        case=db.one('SELECT * FROM cases WHERE id=?',('c1',))
+        calls=[]
+        def structured(self,category,prompt,context,schema):
+            self.calls.append(category)
+            if category=='blueprint':return blueprint
+            if category=='case_review':return {'accepted':False,'issues':['Object can be found before solving motive.'],'alternative_routes':[],'reasoning_quality':'fair'}
+            if category=='review_objections':
+                assert context['objections']==['Object can be found before solving motive.']
+                return {'accepted':not real_defect,'issues':['Essential evidence unreachable.'] if real_defect else []}
+            assert category=='initial_state_review'
+            return {'accepted':True,'issues':[]}
+    ai=ControlledAI()
+    if real_defect:
+        with pytest.raises(InvalidContent):worker.generate(job,ai)
+        checkpoint=json.loads(db.one('SELECT checkpoint FROM jobs WHERE id=?',(job['id'],))['checkpoint'])
+        assert checkpoint['feedback']==['Essential evidence unreachable.']
+        assert 'initial_state_review' not in ai.calls
+    else:
+        worker.generate(job,ai)
+        assert 'initial_state_review' in ai.calls
+        assert db.one('SELECT status FROM jobs WHERE id=?',(job['id'],))['status']=='done'
