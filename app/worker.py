@@ -48,7 +48,7 @@ def generate(job, ai):
         else:
             save({'blueprint':raw})
     if not raw:
-        raw=ai.structured('blueprint',GENERATOR,{'settings':settings,'repair_feedback':feedback,'previous_draft':checkpoint.get('draft'),'repair_revision':revision},Blueprint)
+        raw=ai.structured('blueprint',GENERATOR+('\nREPAIR TASK: Fix the supplied concrete validation errors with minimal consistent edits to previous_draft. Trace every blocked dependency to its root. For a missing tool, provide a real reachable acquisition path in objects/checks; dialogue cannot give or reveal items. Preserve essential clues, fixed truth and valid parts. Output the corrected full blueprint, never the unchanged previous version.' if checkpoint.get('draft') else ''),{'settings':settings,'repair_feedback':feedback,'previous_draft':checkpoint.get('draft'),'repair_revision':revision},Blueprint)
         save({'blueprint':raw})
     try:
         b=validate_blueprint(raw)
