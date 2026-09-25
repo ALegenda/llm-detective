@@ -45,8 +45,9 @@ ENV_FILE=/absolute/path/to/existing/.env .venv/bin/python -m uvicorn app.main:ap
 |---|---|
 | `ENV_FILE` | Явно выбранный файл окружения вместо `.env` |
 | `DATA_DIR` | Каталог БД и приватных изображений |
-| `OPENAI_TEXT_MODEL`, `OPENAI_IMAGE_MODEL` | Модели диалогов/интерпретации и изображений |
-| `OPENAI_STORY_MODEL`, `OPENAI_STORY_REASONING` | Отдельная модель подготовки/проверок сюжета: по умолчанию `gpt-5.4`, `medium`; дороже быстрых игровых вызовов |
+| `OPENAI_TEXT_MODEL`, `OPENAI_IMAGE_MODEL` | Модели диалогов/интерпретации (по умолчанию GPT-6 Luna) и изображений |
+| `OPENAI_TEXT_REASONING` | Быстрые игровые вызовы GPT-6: по умолчанию `none`; подготовка отдельно использует `medium` |
+| `OPENAI_STORY_MODEL`, `OPENAI_STORY_REASONING` | Отдельная модель подготовки/проверок сюжета: по умолчанию `gpt-6-luna`, `medium` |
 | `WORKERS` | Параллельные исполнители, 2–4, по умолчанию 2; отдельная очередь для изображений |
 | `CASE_CALL_LIMIT` | Предел вызовов подготовки сюжета и изображений на дело, по умолчанию 140 |
 | `ATTEMPT_CALL_LIMIT` | Отдельный бюджет действий на попытку, по умолчанию 200 вызовов |

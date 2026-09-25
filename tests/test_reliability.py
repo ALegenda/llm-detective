@@ -474,3 +474,7 @@ def test_story_calls_use_dedicated_reasoning_model_and_cache_identity(game,monke
     assert keys[-1][1]!=keys[-2][1]
     ai.structured('dialogue','Write',{},StateReview)
     assert calls[-1]['model']=='fast-model' and 'reasoning' not in calls[-1]
+    monkeypatch.setattr(config,'TEXT_MODEL','gpt-6-luna')
+    monkeypatch.setattr(config,'TEXT_REASONING','none')
+    ai.structured('dialogue','Write',{},StateReview)
+    assert calls[-1]['model']=='gpt-6-luna' and calls[-1]['reasoning']=={'effort':'none'}
