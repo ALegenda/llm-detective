@@ -13,7 +13,7 @@ from .ai import InvalidContent
 from .models import Model, Location, Thing, Check, Account, Blueprint
 from .generation import validate_blueprint
 
-VERSION = 3
+VERSION = 4
 
 class Place(Model):
     name: str
@@ -39,6 +39,7 @@ class Clue(Model):
     location_index: int = Field(ge=0, le=4)
     portable: bool
     source_kind: Literal['artifact','document','trace','fixture']
+    container_path: list[str] = Field(default_factory=list, max_length=3, description='Authoritative CURRENT physical enclosure chain, outermost to innermost. Empty for exposed objects, exterior marks and architectural traces. Exact container names, never rooms.')
     method: Literal['inspect','read','compare','experiment']
     focus: str = Field(description='A short noun phrase naming the visible feature being investigated, never an action or hidden conclusion.')
     observation: str
@@ -135,12 +136,12 @@ class StoryAudit(Model):
     strengths: list[str]
 
 OUTLINE_PROMPT = '''Design a compelling fair mystery as CAUSES AND EVIDENCE, not game code. Follow the user's theme materially: local geography/history/occupation must affect method and evidence. All player-facing text in settings.language. Short: 3 places, 3 people, 7-9 clues; standard: 4/4/10-12; long: 5/5/13-16. Place 0 is a hub connected to every other place; all places accessible from start. No other place-to-place direct exits. Cast stays available, no timed escape or mandatory confession. The player is a SEPARATE visiting investigator; never turn the player into an NPC or assign a cast member the role of the player leading this investigation.
-First establish a coherent past: who did what, how, when, why, and where any missing object is NOW. Then derive physical evidence from that past. Each clue has one DIFFERENT physical source: a document, trace, device, recovered object or material experiment. Clues have explicit readable times/names/physical details. observation contains ONLY what can actually be perceived/read/tested, not omniscient motives, route deductions or declaring guilt. significance is PRIVATE design reasoning. method is inspect/read/compare/experiment. focus is a concise NOUN PHRASE about the visible feature, not an infinitive or hidden finding. The compiler supplies action verbs. A source is the ACTUAL document, artifact, trace or fixture being observed, never a container whose contents you merely describe. Containers are created separately by the world planner. Opening a pouch to find an artifact requires an ARTIFACT source wrapped in a pouch container, never a check pretending to open it. Each experiment needs a real portable instrument; each comparison needs two earlier observations. source_surface is exterior only, never hidden writing or current holder/location; source name/appearance must not reveal a hidden conclusion. Locations are present AFTER the incident. If something is missing, set missing_item_name to that actual object (e.g. bronze tablet, NOT its pouch/box) and missing_item_clue_index to the dedicated artifact clue. That clue source_name must equal missing_item_name, source_kind=artifact, portable=true. For no missing item use empty name and null index. Its location is the true CURRENT hiding place, never its supposedly empty old container. Recovery is allowed early and does not itself solve the case.
+First establish a coherent past: who did what, how, when, why, and where any missing object is NOW. Then derive physical evidence from that past. Fix each source container_path as the CURRENT physical enclosure chain (outermost first), with exact distinct container names; use [] for exposed objects, exterior marks and architectural traces on floors/walls. A source on/next to a cabinet is NOT inside it. A hidden artifact must name its actual hiding enclosure in this structured path as well as the causal story. Use at most three unique container names across the entire story, consistent rooms and nesting. Each clue has one DIFFERENT physical source: a document, trace, device, recovered object or material experiment. Clues have explicit readable times/names/physical details. observation contains ONLY what can actually be perceived/read/tested, not omniscient motives, route deductions or declaring guilt. significance is PRIVATE design reasoning. method is inspect/read/compare/experiment. focus is a concise NOUN PHRASE about the visible feature, not an infinitive or hidden finding. The compiler supplies action verbs. A source is the ACTUAL document, artifact, trace or fixture being observed, never a container whose contents you merely describe. Containers are created separately by the world planner. Opening a pouch to find an artifact requires an ARTIFACT source wrapped in a pouch container, never a check pretending to open it. Each experiment needs a real portable instrument; each comparison needs two earlier observations. source_surface is exterior only, never hidden writing or current holder/location; source name/appearance must not reveal a hidden conclusion. Locations are present AFTER the incident. If something is missing, set missing_item_name to that actual object (e.g. bronze tablet, NOT its pouch/box) and missing_item_clue_index to the dedicated artifact clue. That clue source_name must equal missing_item_name, source_kind=artifact, portable=true. For no missing item use empty name and null index. Its location is the true CURRENT hiding place, never its supposedly empty old container. Recovery is allowed early and does not itself solve the case.
 Every conclusion (identity, causal method and evidenced motive, plus at most 2 necessary details) must have >=2 DISTINCT independent material sources. Use zero-based clue_indices. Motive must be inferable from available records/actions, never only private_context or confession. Every decisive assertion has a support route. An alternative suspect must have a plausible innocent secret that explains their misleading conduct. fair_reversal must be earned by evidence, not information withheld from the player. Avoid generic identical guilty/innocent templates. Difficulty controls inference depth, not keys or clue count. Include a meaningful experiment or comparison. Put prerequisite observations earlier than comparisons in clue order. Do not require consumable/destructive actions or unsupported physical effects: a check observes only; opening/taking are separate engine actions.
 Cast knowledge contains concrete personal memories and beliefs ONLY, no global omniscience; indicate dishonest beliefs/claims and what the person knows of them. appearance fixes gender and identity. public_incident explains the assignment without leaking private facts. If repairing, preserve valid facts and the causal truth; fix the specified source/contradiction, not the whole story. Never resubmit an unchanged rejected stage.'''
 
 WORLD_PROMPT = '''Create a physically consistent access layout for the fixed outline using only supported recipes. Do not change the incident, sources, observation modes or locations. containers is a shared list of 0-3 actual openable containers. parent_index=null means visible in the room. A nested container may reference ONLY an EARLIER index; its room must equal its parent's room. Multiple sources can share the same container_index. Sources wrapped in nested containers become visible ONLY after the actual ancestors open. Empty container list is valid for sources in plain sight. Never duplicate an existing container under another name or expose a source which prose places inside a closed one.
-For every f_N give container_index=null if source is visibly exposed, otherwise the exact container index. Its container must be in the source's authored room. A missing artifact is a separate source inside its current hiding container, never represented by the pouch instead of the artifact. Do not put architectural traces inside boxes. Exterior marks can be standalone fixtures on a container.
+The outline container_path is authoritative: reproduce exactly these named enclosures and ancestor order, with no added or omitted enclosure. Never invent access puzzles. For every f_N give container_index=null when its container_path is empty, otherwise the exact innermost container index. Its container must be in the source's authored room. A missing artifact is a separate source inside its current hiding container, never represented by the pouch instead of the artifact. Do not put architectural traces inside boxes. Exterior marks can be standalone fixtures on a container.
 A locked container additionally creates a portable key initially visible in key_location OUTSIDE all containers. Use at most one lock for a short story. Empty key fields for unlocked containers. A tool_name creates a portable instrument visible in tool_location; empty all tool strings otherwise. An experiment MUST have its real instrument. A comparison MUST require at least two earlier f_N observations offered by the schema. Ordinary inspect/read must not require prior observations. Never put required objects in NPC possession or describe gifts: dialogue cannot transfer things. Each object name denotes one physical thing, with exterior-only surfaces. The compiler owns IDs, openings, discovery, taking and costs. Checks ONLY observe; no invented changes or remote measurements. Follow repair feedback with minimal corrections to this layout.'''
 
 
@@ -160,8 +161,16 @@ def validate_outline(raw, settings):
     for group in ['cast','clues']:
         for i,item in enumerate(o[group]):
             if item['location_index']>=len(o['places']):errors.append(f'{group}[{i}].location_index outside places')
+    placements={}
     for i,c in enumerate(o['clues']):
         if c['method']=='compare' and i<2:errors.append(f'clues[{i}] comparison must follow at least two source observations')
+        path=c['container_path']
+        if any(not name.strip() for name in path) or len(set(path))!=len(path):errors.append(f'clues[{i}] container_path must contain distinct nonempty names')
+        for depth,name in enumerate(path):
+            position=(c['location_index'],tuple(path[:depth]))
+            if name in placements and placements[name]!=position:errors.append(f'Container {name} has conflicting locations or ancestors')
+            placements[name]=position
+    if len(placements)>3:errors.append('Use at most three physical containers across all container_path chains')
     names=[c['source_name'].strip().casefold() for c in o['clues']]
     if len(names)!=len(set(names)):errors.append('Each clue must use a distinct named material source')
     for i,c in enumerate(o['conclusions']):
@@ -191,6 +200,7 @@ def world_schema(o):
         if not prior:limits['max_length']=0
         tool_rooms=rooms if c['method']=='experiment' else ('',)+rooms
         recipe=create_model(f'AccessForClue{i+1}',__base__=AccessRecipe,
+            container_index=(int if c.get('container_path') else type(None),Field(ge=0,le=2) if c.get('container_path') else Field()),
             tool_name=(str,Field(min_length=1) if c['method']=='experiment' else Field()),
             tool_location=(Literal.__getitem__(tool_rooms),...),
             requires=(list[Literal.__getitem__(prior)] if prior else list[str],Field(**limits)))
@@ -241,6 +251,12 @@ def compile_world(o, raw_plan, script=None, language='ru'):
             if ci>=len(containers):raise ValueError(fid+' references a nonexistent container_index')
             if containers[ci]['location']!=room:raise ValueError(fid+' source and container must be in the same room')
             parent=container_ids[ci]
+        actual_path=[];cursor=r['container_index']
+        while cursor is not None:
+            actual_path.insert(0,containers[cursor]['name'])
+            cursor=containers[cursor]['parent_index']
+        if actual_path!=c.get('container_path',[]):
+            raise ValueError(fid+' placement differs from the authoritative outline container_path: '+repr(c.get('container_path',[])))
         if c['method']=='experiment' and not r['tool_name'].strip():raise ValueError(fid+' experiment needs its actual instrument')
         if c['method']=='compare' and len(set(r['requires']))<2:raise ValueError(fid+' comparison needs at least two earlier observations')
         if c['method'] in ['inspect','read'] and r['requires']:raise ValueError(fid+' ordinary inspection/reading must not depend on other observations')

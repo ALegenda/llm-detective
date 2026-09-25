@@ -18,7 +18,7 @@ def outline():
         'explanation':'Ирина скрыла письмо с новым временем встречи.','dramatic_question':'Почему письмо исчезло?','fair_reversal':'Опоздание оказалось намеренным.',
         'places':[{'name':name,'description':name,'atmosphere':'Туман','image_prompt':'Empty architecture','travel_minutes':2} for name in ['Контора','Причал','Мастерская']],
         'cast':[{'name':name,'role':'Свидетель','appearance':'Взрослый человек','personality':'Сдержанный','interests':'Работа','location_index':i,'knowledge':['Встреча в 18:00.'],'innocent_secret':''} for i,name in enumerate(['Ирина','Лев','Анна'])],
-        'clues':[{'source_name':'Источник '+str(i),'source_surface':'Закрытый документ '+str(i),'source_image_prompt':'Closed paper','location_index':i%3,'portable':i==6,'source_kind':'artifact' if i==6 else 'document','method':'compare' if i==3 else 'read','focus':'запись '+str(i),'observation':'На документе '+str(i)+' указана встреча в 18:00.','significance':'Устанавливает время'} for i in range(7)],
+        'clues':[{'source_name':'Источник '+str(i),'source_surface':'Закрытый документ '+str(i),'source_image_prompt':'Closed paper','location_index':i%3,'portable':i==6,'container_path':['Сейф'] if i==0 else ['Коробка','Чехол'] if i==6 else [],'source_kind':'artifact' if i==6 else 'document','method':'compare' if i==3 else 'read','focus':'запись '+str(i),'observation':'На документе '+str(i)+' указана встреча в 18:00.','significance':'Устанавливает время'} for i in range(7)],
         'conclusions':[{'description':'Критерий '+str(i),'clue_indices':[i,i+1]} for i in range(3)]}
 
 
@@ -92,6 +92,7 @@ def test_compiled_recipe_combinations_are_executable(outline):
         plan={}
         for i in range(7):
             ci=i%3 if rng.random()<.7 else None
+            outline['clues'][i]['container_path']=[f'Контейнер {ci}'] if ci is not None else []
             plan[f'f_{i+1}']=recipe(container_index=ci,requires=['f_1','f_3'] if i==3 else [])
         plan['containers']=[box(f'Контейнер {i}',f'l_{i+1}',locked=rng.random()<.5) for i in range(3)]
         b=compile_world(outline,plan)
@@ -148,11 +149,11 @@ def test_worker_publishes_only_certified_new_pipeline_and_keeps_proof_private(cl
     worker.generate(j,ai)
     row=db.one("SELECT * FROM cases WHERE id='c1'")
     assert row['status']=='ready'
-    assert json.loads(row['blueprint'])['_meta']['generation_version']==3
+    assert json.loads(row['blueprint'])['_meta']['generation_version']==4
     assert json.loads(row['review'])['mechanical_proof']['clues_acquired']==7
     public=client.get('/api/cases/c1').json()
     assert 'certificate' not in public and 'outline' not in public and 'truth' not in public
-    assert public['generation_version']==3 and public['stage']=='ready'
+    assert public['generation_version']==4 and public['stage']=='ready'
 
 
 def test_wrong_independent_solution_cannot_publish_even_if_auditor_misses_it(game,outline):
@@ -230,6 +231,8 @@ def test_two_experiments_share_the_same_physical_tool(outline):
 def test_shared_container_and_exterior_fixture_use_one_physical_object(outline):
     plan=make_plan();plan['containers']=[box('Коробка','l_1'),box('Коробка','l_1')]
     plan['f_1']['container_index']=0;plan['f_7']['container_index']=1
+    outline['clues'][0]['container_path']=['Коробка']
+    outline['clues'][6]['container_path']=['Коробка']
     outline['clues'][0].update(source_name='Коробка',source_kind='fixture',method='inspect')
     b=compile_world(outline,plan)
     assert len([o for o in b['objects'] if o['name']=='Коробка'])==1
@@ -245,3 +248,18 @@ def test_manual_retry_resets_repair_budget_but_preserves_revision_and_stages(cli
     cp=json.loads(db.one('SELECT checkpoint FROM jobs WHERE id=?',(j['id'],))['checkpoint'])
     assert cp['revision']==8 and cp['outline']=={'kept':True}
     assert cp['rejections']=={} and cp['repair_round_failures']==0
+
+
+def test_layout_cannot_hide_exposed_trace_or_expose_authored_hidden_artifact(outline):
+    outline['clues'][1].update(source_name='След на полу',source_kind='trace',container_path=[])
+    plan=make_plan();plan['f_2']['container_index']=0
+    with pytest.raises(ValidationError):compile_world(outline,plan)
+    plan=make_plan();plan['f_7']['container_index']=None
+    with pytest.raises(ValidationError):compile_world(outline,plan)
+    plan=make_plan();plan['f_7']['container_index']=1
+    with pytest.raises(ValueError,match='placement differs'):compile_world(outline,plan)
+
+
+def test_outline_rejects_one_container_in_two_physical_places(outline):
+    outline['clues'][1]['container_path']=['Сейф']
+    with pytest.raises(ValueError,match='conflicting locations'):validate_outline(outline,SETTINGS)
