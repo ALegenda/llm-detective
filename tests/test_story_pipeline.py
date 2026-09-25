@@ -213,3 +213,25 @@ def test_experiment_without_instrument_and_comparison_without_inputs_are_rejecte
 def test_container_cannot_replace_the_actual_missing_item(outline):
     outline['clues'][6]['source_name']='Чехол с письмом'
     with pytest.raises(ValueError,match='own portable artifact'):validate_outline(outline,SETTINGS)
+
+
+def test_two_experiments_share_the_same_physical_tool(outline):
+    plan=make_plan()
+    for i in [4,5]:
+        outline['clues'][i]['method']='experiment'
+        plan[f'f_{i+1}']=recipe(tool_name='Лупа',tool_surface='Лупа',tool_image_prompt='Lens',tool_location='l_2')
+    b=compile_world(outline,plan)
+    tools=[o for o in b['objects'] if o['name']=='Лупа']
+    assert len(tools)==1
+    assert b['checks'][4]['requires_tools']==b['checks'][5]['requires_tools']==[tools[0]['id']]
+    assert exercise_world(b,['o_7'])['recovered']==['o_7']
+
+
+def test_shared_container_and_exterior_fixture_use_one_physical_object(outline):
+    plan=make_plan();plan['containers']=[box('Коробка','l_1'),box('Коробка','l_1')]
+    plan['f_1']['container_index']=0;plan['f_7']['container_index']=1
+    outline['clues'][0].update(source_name='Коробка',source_kind='fixture',method='inspect')
+    b=compile_world(outline,plan)
+    assert len([o for o in b['objects'] if o['name']=='Коробка'])==1
+    assert b['checks'][0]['object_id']==b['checks'][6]['requires_open']=='o_box_1'
+    assert exercise_world(b,['o_7'])['recovered']==['o_7']

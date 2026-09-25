@@ -208,21 +208,30 @@ def script_schema(o):
 def compile_world(o, raw_plan, script=None, language='ru'):
     plan=world_schema(o).model_validate(raw_plan).model_dump()
     objects=[];checks=[]
-    def thing(oid,name,surface,prompt,location,**kwargs):
-        objects.append(Thing(id=oid,name=name,surface=surface,image_prompt=prompt,location=location,
-            portable=False,movable=False,openable=False,visible=True,container='',locked=False,key_id='').model_dump()|kwargs)
+    def thing(oid,name,surface,prompt,location,*,fixture_alias=False,**kwargs):
+        candidate=Thing(id=oid,name=name,surface=surface,image_prompt=prompt,location=location,
+            portable=False,movable=False,openable=False,visible=True,container='',locked=False,key_id='').model_dump()|kwargs
+        # Exact same named physical placement denotes a shared entity, not a
+        # new copy for every observation. Different rooms can hold two tools.
+        for existing in objects:
+            if existing['name'].strip().casefold()!=name.strip().casefold() or existing['location']!=location:continue
+            if all(existing[k]==candidate[k] for k in ['portable','openable','container','locked','key_id']):return existing['id']
+            if fixture_alias and existing['openable'] and not candidate['portable'] and candidate['container'] in ['',existing['id']]:return existing['id']
+        objects.append(candidate)
+        return oid
+    container_ids=[]
     containers=plan['containers']
     for i,r in enumerate(containers):
         parent='';key=''
         if r['parent_index'] is not None:
             if r['parent_index']>=i:raise ValueError(f'containers[{i}] may only be inside an earlier container')
             if containers[r['parent_index']]['location']!=r['location']:raise ValueError(f'containers[{i}] room differs from its parent')
-            parent=f"o_box_{r['parent_index']+1}"
+            parent=container_ids[r['parent_index']]
         if r['locked']:
             if not r['key_name'].strip() or not r['key_location']:raise ValueError(f'containers[{i}] needs a named reachable key')
             key=f'o_key_{i+1}'
-            thing(key,r['key_name'],r['key_surface'],r['key_image_prompt'],r['key_location'],portable=True,movable=True)
-        thing(f'o_box_{i+1}',r['name'],r['surface'],r['image_prompt'],r['location'],container=parent,visible=not parent,openable=True,locked=r['locked'],key_id=key)
+            key=thing(key,r['key_name'],r['key_surface'],r['key_image_prompt'],r['key_location'],portable=True,movable=True)
+        container_ids.append(thing(f'o_box_{i+1}',r['name'],r['surface'],r['image_prompt'],r['location'],container=parent,visible=not parent,openable=True,locked=r['locked'],key_id=key))
     verbs={'inspect':'Осмотреть','read':'Прочитать','compare':'Сопоставить','experiment':'Провести проверку'} if language=='ru' else {'inspect':'Examine','read':'Read','compare':'Compare','experiment':'Test'}
     for i,c in enumerate(o['clues']):
         fid=f'f_{i+1}';oid=f'o_{i+1}';r=plan[fid];room=f"l_{c['location_index']+1}"
@@ -231,19 +240,17 @@ def compile_world(o, raw_plan, script=None, language='ru'):
             ci=r['container_index']
             if ci>=len(containers):raise ValueError(fid+' references a nonexistent container_index')
             if containers[ci]['location']!=room:raise ValueError(fid+' source and container must be in the same room')
-            parent=f'o_box_{ci+1}'
+            parent=container_ids[ci]
         if c['method']=='experiment' and not r['tool_name'].strip():raise ValueError(fid+' experiment needs its actual instrument')
         if c['method']=='compare' and len(set(r['requires']))<2:raise ValueError(fid+' comparison needs at least two earlier observations')
         if c['method'] in ['inspect','read'] and r['requires']:raise ValueError(fid+' ordinary inspection/reading must not depend on other observations')
         if r['tool_name'].strip():
             if not r['tool_location']:raise ValueError(fid+' needs tool_location')
-            tool=f'o_tool_{i+1}';tools=[tool]
-            thing(tool,r['tool_name'],r['tool_surface'],r['tool_image_prompt'],r['tool_location'],portable=True,movable=True)
-        thing(oid,c['source_name'],c['source_surface'],c['source_image_prompt'],room,portable=c['portable'],movable=c['portable'],container=parent,visible=not parent)
+            tool=thing(f'o_tool_{i+1}',r['tool_name'],r['tool_surface'],r['tool_image_prompt'],r['tool_location'],portable=True,movable=True)
+            tools=[tool]
+        oid=thing(oid,c['source_name'],c['source_surface'],c['source_image_prompt'],room,fixture_alias=c['source_kind']=='fixture',portable=c['portable'],movable=c['portable'],container=parent,visible=not parent)
         result=script[fid]['result'] if script else c['observation']
         checks.append(Check(id=fid,object_id=oid,intent=verbs[c['method']]+': '+c['focus'],result=result,requires_facts=r['requires'],requires_tools=tools,requires_open=parent,reveals_objects=[],minutes=r['minutes'],essential=True,opens_object=False).model_dump())
-    names=[x['name'].strip().casefold() for x in objects]
-    if len(names)!=len(set(names)):raise ValueError('World recipe creates duplicate physical object names; use distinct containers, keys and tools')
     locations=[]
     for i,p in enumerate(o['places']):
         exits=[f'l_{j+1}' for j in range(1,len(o['places']))] if i==0 else ['l_1']
@@ -343,7 +350,7 @@ def build(job, ai, settings):
     plan=stage_call('world','story_world',WORLD_PROMPT,{'outline':outline},world_schema(outline))
     try:base=compile_world(outline,plan,language=settings['language'])
     except ValueError as e:reject('world',[str(e)])
-    required=[f"o_{outline['missing_item_clue_index']+1}"] if outline['missing_item_clue_index'] is not None else []
+    required=[base['checks'][outline['missing_item_clue_index']]['object_id']] if outline['missing_item_clue_index'] is not None else []
     if 'certificate' not in cp:
         try:cp['certificate']={'forward':exercise_world(base,required),'reverse':exercise_world(base,required,reverse=True)}
         except ValueError as e:reject('world',[str(e)])
