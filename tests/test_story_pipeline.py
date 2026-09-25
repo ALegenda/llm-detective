@@ -253,11 +253,12 @@ def test_manual_retry_resets_repair_budget_but_preserves_revision_and_stages(cli
 def test_layout_cannot_hide_exposed_trace_or_expose_authored_hidden_artifact(outline):
     outline['clues'][1].update(source_name='След на полу',source_kind='trace',container_path=[])
     plan=make_plan();plan['f_2']['container_index']=0
-    with pytest.raises(ValidationError):compile_world(outline,plan)
-    plan=make_plan();plan['f_7']['container_index']=None
-    with pytest.raises(ValidationError):compile_world(outline,plan)
-    plan=make_plan();plan['f_7']['container_index']=1
-    with pytest.raises(ValueError,match='placement differs'):compile_world(outline,plan)
+    assert next(o for o in compile_world(outline,plan)['objects'] if o['id']=='o_2')['container']==''
+    for wrong in [None,0,1,99]:
+        plan=make_plan();plan['f_7']['container_index']=wrong
+        b=compile_world(outline,plan)
+        assert next(o for o in b['objects'] if o['id']=='o_7')['container']=='o_box_3'
+        assert exercise_world(b,['o_7'])['recovered']==['o_7']
 
 
 def test_outline_rejects_one_container_in_two_physical_places(outline):

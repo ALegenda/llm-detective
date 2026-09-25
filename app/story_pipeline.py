@@ -141,7 +141,7 @@ Every conclusion (identity, causal method and evidenced motive, plus at most 2 n
 Cast knowledge contains concrete personal memories and beliefs ONLY, no global omniscience; indicate dishonest beliefs/claims and what the person knows of them. appearance fixes gender and identity. public_incident explains the assignment without leaking private facts. If repairing, preserve valid facts and the causal truth; fix the specified source/contradiction, not the whole story. Never resubmit an unchanged rejected stage.'''
 
 WORLD_PROMPT = '''Create a physically consistent access layout for the fixed outline using only supported recipes. Do not change the incident, sources, observation modes or locations. containers is a shared list of 0-3 actual openable containers. parent_index=null means visible in the room. A nested container may reference ONLY an EARLIER index; its room must equal its parent's room. Multiple sources can share the same container_index. Sources wrapped in nested containers become visible ONLY after the actual ancestors open. Empty container list is valid for sources in plain sight. Never duplicate an existing container under another name or expose a source which prose places inside a closed one.
-The outline container_path is authoritative: reproduce exactly these named enclosures and ancestor order, with no added or omitted enclosure. Never invent access puzzles. For every f_N give container_index=null when its container_path is empty, otherwise the exact innermost container index. Its container must be in the source's authored room. A missing artifact is a separate source inside its current hiding container, never represented by the pouch instead of the artifact. Do not put architectural traces inside boxes. Exterior marks can be standalone fixtures on a container.
+The outline container_path is authoritative and code computes all parent indices and source containment directly from it. You only supply exterior decoration and optional locks for those exact named enclosures; container_index is an advisory legacy field ignored by the compiler. Never invent access puzzles. For every f_N give container_index=null when its container_path is empty, otherwise the exact innermost container index. Its container must be in the source's authored room. A missing artifact is a separate source inside its current hiding container, never represented by the pouch instead of the artifact. Do not put architectural traces inside boxes. Exterior marks can be standalone fixtures on a container.
 A locked container additionally creates a portable key initially visible in key_location OUTSIDE all containers. Use at most one lock for a short story. Empty key fields for unlocked containers. A tool_name creates a portable instrument visible in tool_location; empty all tool strings otherwise. An experiment MUST have its real instrument. A comparison MUST require at least two earlier f_N observations offered by the schema. Ordinary inspect/read must not require prior observations. Never put required objects in NPC possession or describe gifts: dialogue cannot transfer things. Each object name denotes one physical thing, with exterior-only surfaces. The compiler owns IDs, openings, discovery, taking and costs. Checks ONLY observe; no invented changes or remote measurements. Follow repair feedback with minimal corrections to this layout.'''
 
 
@@ -200,7 +200,6 @@ def world_schema(o):
         if not prior:limits['max_length']=0
         tool_rooms=rooms if c['method']=='experiment' else ('',)+rooms
         recipe=create_model(f'AccessForClue{i+1}',__base__=AccessRecipe,
-            container_index=(int if c.get('container_path') else type(None),Field(ge=0,le=2) if c.get('container_path') else Field()),
             tool_name=(str,Field(min_length=1) if c['method']=='experiment' else Field()),
             tool_location=(Literal.__getitem__(tool_rooms),...),
             requires=(list[Literal.__getitem__(prior)] if prior else list[str],Field(**limits)))
@@ -216,6 +215,25 @@ def script_schema(o):
 
 
 def compile_world(o, raw_plan, script=None, language='ru'):
+    # Containment is not a second creative decision. Reconstruct it from the
+    # authoritative outline; the planner only decorates these fixed entities.
+    raw_plan=copy.deepcopy(raw_plan)
+    decorations={r['name']:r for r in raw_plan['containers']}
+    fixed=[];by_name={}
+    for c in o['clues']:
+        parent=None
+        for name in c.get('container_path',[]):
+            if name not in by_name:
+                r=decorations.get(name,{})
+                by_name[name]=len(fixed)
+                fixed.append({'name':name,'surface':r.get('surface',name),'image_prompt':r.get('image_prompt','Closed '+name+', exterior only, no contents visible'),
+                    'location':f"l_{c['location_index']+1}",'parent_index':parent,
+                    'locked':r.get('locked',False),'key_name':r.get('key_name',''),'key_surface':r.get('key_surface',''),
+                    'key_image_prompt':r.get('key_image_prompt',''),'key_location':r.get('key_location','')})
+            parent=by_name[name]
+    raw_plan['containers']=fixed
+    for i,c in enumerate(o['clues']):
+        raw_plan[f'f_{i+1}']['container_index']=by_name[c['container_path'][-1]] if c.get('container_path') else None
     plan=world_schema(o).model_validate(raw_plan).model_dump()
     objects=[];checks=[]
     def thing(oid,name,surface,prompt,location,*,fixture_alias=False,**kwargs):

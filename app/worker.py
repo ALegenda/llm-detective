@@ -150,7 +150,9 @@ def grounded_evaluation(raw, explanation, evidence, rubric, language='ru'):
         if criterion['satisfied'] and (not criterion['quote'].strip() or not criterion['evidence_ids']):
             raise InvalidContent(f"Satisfied criterion {criterion['criterion_index']} needs an exact player quotation and at least one actually cited evidence id from {evidence}. This also applies to identity and causal-method criteria.")
         if not criterion['satisfied']:missing.append(criterion['feedback'])
-    proved=bool(evidence and raw['claims'] and not result['mistaken'] and not result['unsupported'] and not missing)
+    # Optional unsupported remarks do not add new victory requirements beyond
+    # the fixed causal rubric. Wrong assertions still prevent a proved verdict.
+    proved=bool(evidence and raw['claims'] and not result['mistaken'] and not missing)
     conclusion=(('Ваша версия подтверждена приведёнными доказательствами по всем критериям дела.' if proved else 'Ваша версия разобрана ниже. Собранные доводы пока не подтверждают полное решение дела.') if language=='ru' else ('Your explanation is supported by the cited evidence across all case criteria.' if proved else 'Your explanation is assessed below. The argument does not yet establish the full solution.'))
     return result | {'conclusion':conclusion,'missing':missing,'criteria':raw['criteria'],
                      'evidence_assessment':raw['evidence_assessment'],'proved':proved}

@@ -298,6 +298,19 @@ def test_evaluation_cannot_move_the_rubric_or_cite_unprovided_evidence():
     with pytest.raises(InvalidContent,match='fixed rubric'):worker.grounded_evaluation(raw,text,['f1'],rubric)
 
 
+def test_optional_uncited_remark_does_not_override_fully_proven_solution():
+    text='Ирина перенесла письмо. Она также это подтвердила.'
+    raw={'claims':[{'quote':'Ирина перенесла письмо.','status':'accurate','feedback':'Подтверждено'},
+                   {'quote':'Она также это подтвердила.','status':'unsupported','feedback':'Показание не приложено'}],
+         'criteria':[{'criterion_index':0,'satisfied':True,'quote':'Ирина перенесла письмо.','evidence_ids':['f1'],'feedback':'Материальные источники достаточны'}],
+         'evidence_assessment':[]}
+    rubric=[{'description':'Кто перенёс письмо'}]
+    result=worker.grounded_evaluation(raw,text,['f1'],rubric)
+    assert result['proved'] and result['unsupported']
+    raw['criteria'][0]['satisfied']=False
+    assert not worker.grounded_evaluation(raw,text,['f1'],rubric)['proved']
+
+
 def test_finish_pipeline_persists_rubric_grounded_verdict(client,game):
     b,s=game
     explanation='Ирина перенесла письмо без взлома, чтобы скрыть перенос встречи.'
