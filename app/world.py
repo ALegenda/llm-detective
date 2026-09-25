@@ -54,10 +54,15 @@ def openable(b,obj):
     return obj.get('openable',False) or obj['locked'] or any(o['container']==obj['id'] for o in b['objects']) or any(c['requires_open']==obj['id'] or (c['object_id']==obj['id'] and check_opens(c)) for c in b['checks'])
 
 
+def check_changes_state(c,s):
+    return ((check_opens(c) and not s['objects'][c['object_id']]['open'])
+            or any(not s['objects'][oid]['visible'] for oid in c['reveals_objects']))
+
+
 def available_checks(b,s,oid):
     """Only actionable intents, never results or hidden prerequisite names."""
     known={e['id'] for e in s['evidence']}
-    return [{'id':c['id'],'label':c['intent'],'minutes':c['minutes'],'done':c['id'] in known}
+    return [{'id':c['id'],'label':c['intent'],'minutes':c['minutes'],'done':c['id'] in known and not check_changes_state(c,s)}
             for c in b['checks'] if c['object_id']==oid
             and set(c['requires_facts'])<=known
             and set(c['requires_tools'])<=set(s['inventory'])
@@ -251,7 +256,7 @@ def reduce(b, old, steps, payload, speeches=None):
                 if not c or c['object_id']!=target:
                     messages.append(obj['surface']); continue
                 known={e['id'] for e in s['evidence']}
-                if c['id'] in known:
+                if c['id'] in known and not check_changes_state(c,s):
                     messages.append('Эта проверка уже выполнена. Запись в блокноте: '+c['intent']+'.'); continue
                 if set(c['requires_facts'])-known:
                     messages.append('Для этой проверки пока не хватает исходных наблюдений. Сначала исследуйте связанные предметы.'); break

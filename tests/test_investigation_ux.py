@@ -89,3 +89,14 @@ def test_bad_dialogue_is_rewritten_not_replaced_with_author_notes(client,game,re
         current=client.get('/api/attempts/a1').json()['world']
         assert current['minute']==0 and current['evidence']==[] and current['dialogue']==[]
     assert ai.count==2
+
+
+def test_repeat_search_can_recover_an_object_hidden_again(game):
+    b,s=game
+    b['checks'][0]['reveals_objects']=['o_key']
+    s,_,_=world.reduce(b,s,[step('check','o_desk','f_lock')],P)
+    s['objects']['o_key']['visible']=False
+    assert not world.available_checks(b,s,'o_desk')[0]['done']
+    after,result,_=world.reduce(b,s,[step('check','o_desk','f_lock')],P)
+    assert after['objects']['o_key']['visible']
+    assert result['minutes']==2 and result['evidence_ids']==[]

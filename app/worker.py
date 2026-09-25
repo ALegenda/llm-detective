@@ -173,7 +173,7 @@ def prepare_command(job,ai):
                 ctx=world.speech_context(b,current,target,payload)|{'language':settings['language']}
                 allowed_ids=[a['id'] for a in ctx['accounts']]
                 scoped=create_model('ScopedSpeech',__base__=Speech,account_ids=(list[Literal.__getitem__(tuple(allowed_ids))] if allowed_ids else list[str],Field(description='Only authored account ids for claims actually communicated. For information from personal knowledge without a matching account use an EMPTY list. Never a person id.',**({'max_length':0} if not allowed_ids else {}))))
-                feedback=[]
+                feedback=checkpoint.get('speech_feedback',{}).get(str(i),[])
                 for repair in range(2):
                     speech=ai.structured('dialogue',SPEAKER,ctx|{'repair_feedback':feedback},scoped)
                     audit=ai.structured('dialogue_audit',AUDITOR,{'context':ctx,'speech':speech},SpeechAudit)
@@ -189,6 +189,7 @@ def prepare_command(job,ai):
                 else:
                     # Never paste author notes into a character's mouth. A failed
                     # turn remains retryable and cannot advance time or evidence.
+                    db.save_checkpoint(job,{'interpretation':interpretation,'speech_feedback':{str(i):feedback}})
                     raise InvalidContent('Dialogue did not pass relevance, voice and grounding checks.')
                 speeches[str(i)]=speech
                 db.save_checkpoint(job,{'interpretation':interpretation,'speeches':speeches})
