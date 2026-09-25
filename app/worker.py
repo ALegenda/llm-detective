@@ -8,7 +8,7 @@ import time
 from pathlib import Path
 from typing import Literal
 from pydantic import create_model, Field
-from . import config, db, world
+from . import config, db, world, storage
 from .ai import AI, ProviderFailure, InvalidContent
 from .generation import GENERATOR, validate_blueprint
 from .models import Blueprint, Review, StateReview, Interpretation, Speech, DialogueDraft, StatementExcerpt, SpeechAudit, Evaluation, QuotedEvaluation, ClaimAssessment, CriterionAssessment, VisualReview
@@ -324,6 +324,10 @@ def asset_job(job,ai):
         instructions+='\nPrevious review feedback (advisory; apply only genuine blocking corrections): '+checkpoint['feedback']+'\nPreserve ordinary instrument graduations and allow subtle emotions even if earlier feedback requested their removal or exaggeration. Final visual constraints above take priority over this historical feedback.'
     rel=checkpoint.get('file')
     if not rel:
+        if not storage.image_space_available():
+            storage.prune_discarded_images()
+            if not storage.image_space_available():
+                raise ProviderFailure('storage_full',True,300)
         data=ai.image(instructions,str(config.DATA/base['path']) if base else None,landscape=kind=='location')
         rel='assets/'+db.uid()+'.png'
         path=config.DATA/rel; tmp=path.with_suffix('.part');tmp.write_bytes(data);tmp.replace(path)
@@ -339,6 +343,9 @@ def asset_job(job,ai):
         db.save_checkpoint(job,{'file':rel,'review':review})
     if not review['accepted']:
         db.save_checkpoint(job,{'feedback':review['reason']})
+        # This rejected candidate has no asset record and is no longer needed
+        # by the job. Previously every rejection left its PNG on disk forever.
+        (config.DATA/rel).unlink(missing_ok=True)
         raise InvalidContent(review['reason'])
     with db.transaction() as con:
         if not db.fenced(con,job):return

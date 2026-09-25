@@ -104,6 +104,8 @@ def admin(user=Depends(authenticate)):
 @asynccontextmanager
 async def lifespan(app):
     config.preflight();db.init()
+    from . import storage
+    storage.prune_discarded_images()
     stop=threading.Event()
     count=max(3,min(4,int(os.getenv('WORKERS','3'))))
     lanes=['interactive','generation','assets']+(['generation'] if count==4 else [])
