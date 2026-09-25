@@ -340,8 +340,8 @@ def test_chat_message_is_speech_not_a_physical_action(client,game):
             if category=='dialogue':
                 assert context['request']==text
                 assert context['person']['id']=='n_ira'
-                return {'reply':'Я была в саду в шесть.','account_ids':['s_time'],'emotion':'calm','attitude':'neutral'}
-            return {'grounded':True,'reason':'Matches authored account'}
+                return {'reply':'Я была в саду в шесть.','account_ids':['s_time'],'excerpts':[{'account_id':'s_time','quote':'Я была в саду в шесть.'}],'emotion':'calm','attitude':'neutral'}
+            return {'grounded':True,'answers_question':True,'in_character':True,'recordable':True,'reason':'Matches authored account'}
     ai=ControlledAI();worker.command_job(job,ai)
     saved=client.get('/api/attempts/a1').json()
     assert ai.calls==['dialogue','dialogue_audit']

@@ -54,12 +54,36 @@ def openable(b,obj):
     return obj.get('openable',False) or obj['locked'] or any(o['container']==obj['id'] for o in b['objects']) or any(c['requires_open']==obj['id'] or (c['object_id']==obj['id'] and check_opens(c)) for c in b['checks'])
 
 
+def available_checks(b,s,oid):
+    """Only actionable intents, never results or hidden prerequisite names."""
+    known={e['id'] for e in s['evidence']}
+    return [{'id':c['id'],'label':c['intent'],'minutes':c['minutes'],'done':c['id'] in known}
+            for c in b['checks'] if c['object_id']==oid
+            and set(c['requires_facts'])<=known
+            and set(c['requires_tools'])<=set(s['inventory'])
+            and (not c['requires_open'] or s['objects'][c['requires_open']]['open']
+                 or (check_opens(c) and c['requires_open']==oid))
+            and (not check_opens(c) or not s['objects'][oid]['locked']
+                 or index(b,'objects')[oid]['key_id'] in s['inventory'])]
+
+
+def object_step(b,s,payload):
+    obj=index(b,'objects').get(payload['target'])
+    action=payload.get('object_action')
+    if not obj or not visible(obj,s) or action not in ['check','take','put','open','close']:
+        raise ValueError('Предмет или действие сейчас недоступны.')
+    if action=='check' and payload.get('check_id') not in {c['id'] for c in available_checks(b,s,obj['id'])}:
+        raise ValueError('Эта проверка сейчас недоступна. Обновите карточку предмета.')
+    return {'kind':action,'target':obj['id'],'check_id':payload.get('check_id',''),
+            'destination':s['location'] if action=='put' else '', 'topic':'','minutes':0,'explanation':''}
+
+
 def public_world(b, s):
     objects=[]
     for o in b['objects']:
         if visible(o,s):
             os=s['objects'][o['id']]
-            objects.append({k:o[k] for k in ['id','name','surface','portable']} | {k:os[k] for k in ['open','locked','container']} | {'location':effective_location(o['id'],s),'openable':openable(b,o),'position':os.get('position','')})
+            objects.append({k:o[k] for k in ['id','name','surface','portable']} | {k:os[k] for k in ['open','locked','container']} | {'location':effective_location(o['id'],s),'openable':openable(b,o),'position':os.get('position',''), 'checks':available_checks(b,s,o['id'])})
     people=[]
     for n in b['people']:
         ns=s['people'][n['id']]
@@ -225,8 +249,10 @@ def reduce(b, old, steps, payload, speeches=None):
             if kind=='check':
                 c=checks.get(step['check_id'])
                 if not c or c['object_id']!=target:
-                    messages.append(obj['surface']); advance(b,s,1,messages); continue
+                    messages.append(obj['surface']); continue
                 known={e['id'] for e in s['evidence']}
+                if c['id'] in known:
+                    messages.append('Эта проверка уже выполнена. Запись в блокноте: '+c['intent']+'.'); continue
                 if set(c['requires_facts'])-known:
                     messages.append('Для этой проверки пока не хватает исходных наблюдений. Сначала исследуйте связанные предметы.'); break
                 if set(c['requires_tools'])-set(s['inventory']):
@@ -275,6 +301,8 @@ def reduce(b, old, steps, payload, speeches=None):
             elif kind=='open':
                 if not openable(b,obj):
                     messages.append('У этого предмета нет доступной открывающейся части.'); break
+                if os['open']:
+                    messages.append('Предмет уже открыт.'); continue
                 if os['locked']:
                     if obj['key_id'] not in s['inventory']:
                         messages.append('Заперто. Нужен подходящий ключ или проверяемый способ вскрытия.'); break
@@ -284,9 +312,13 @@ def reduce(b, old, steps, payload, speeches=None):
                     if s['objects'][child['id']]['container']==target:
                         s['objects'][child['id']]['visible']=True
                 advance(b,s,1,messages); messages.append('Открыто: '+obj['name']+'.')
+                contents=[o['name'] for o in b['objects'] if s['objects'][o['id']]['container']==target and visible(o,s)]
+                if contents: messages.append('Теперь доступны: '+', '.join(contents)+'.')
             else:
                 if not openable(b,obj):
                     messages.append('У этого предмета нет доступной открывающейся части.'); break
+                if not os['open']:
+                    messages.append('Предмет уже закрыт.'); continue
                 os['open']=False; advance(b,s,1,messages); messages.append('Закрыто: '+obj['name']+'.')
         elif kind=='talk':
             if not npc or s['people'][target]['location']!=s['location'] or s['people'][target]['departed']:
@@ -304,9 +336,10 @@ def reduce(b, old, steps, payload, speeches=None):
             ns['memory'].append({'kind':'conversation','player_claim':payload['text'],'shown':shown,'accounts':speech['account_ids'],'minute':s['minute']})
             for aid in speech['account_ids']:
                 a=allowed[aid]
-                add_evidence(s,aid,a['topic'],speech['reply'],'statement',npc['name'])
+                excerpt=next((x['quote'] for x in speech.get('excerpts',[]) if x['account_id']==aid),speech['reply'])
+                add_evidence(s,aid,a['topic'],excerpt,'statement',npc['name'])
                 trigger(b,s,'question',aid,messages)
-            if not speech['account_ids'] and speech.get('grounded'):
+            if not speech['account_ids'] and speech.get('grounded') and speech.get('recordable',False):
                 add_evidence(s,'s_live_'+db.digest([target,speech['reply']])[:16],'Ответ: '+payload['text'][:70],speech['reply'],'statement',npc['name'])
             for eid in shown: trigger(b,s,'evidence',eid,messages)
             s['dialogue'].append({'person':target,'name':npc['name'],'player':payload['text'],'reply':speech['reply'],'shown':shown,'minute':s['minute']})
@@ -341,4 +374,6 @@ def reduce(b, old, steps, payload, speeches=None):
             raise ValueError('Unknown action')
         mutations.append({'kind':kind,'target':target,'minute':s['minute']})
     observe_people(b,s)
-    return s, {'messages':messages,'minutes':s['minute']-old['minute']}, mutations
+    return s, {'messages':messages,'minutes':s['minute']-old['minute'],
+               'evidence_ids':[e['id'] for e in s['evidence'] if e['id'] not in {x['id'] for x in old['evidence']}],
+               'conversation':next((step['target'] for step in steps if step['kind']=='talk'), '')}, mutations

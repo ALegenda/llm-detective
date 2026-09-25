@@ -148,15 +148,24 @@ class Interpretation(Model):
     steps: list[Step] = Field(max_length=4)
 
 
+class StatementExcerpt(Model):
+    account_id: str
+    quote: str = Field(description="Short exact contiguous excerpt of reply conveying this account, without unrelated conversation.")
+
+
 class Speech(Model):
     reply: str
     account_ids: list[str]
+    excerpts: list[StatementExcerpt]
     emotion: Literal['calm','warm','guarded','anxious','irritated','sad','surprised']
     attitude: Literal['neutral','friendly','hostile']
 
 
 class SpeechAudit(Model):
     grounded: bool
+    answers_question: bool
+    in_character: bool
+    recordable: bool = Field(description="Contains substantive new case information, not greetings, uncertainty, refusals or repeated small talk.")
     reason: str
 
 
@@ -208,8 +217,10 @@ class AuthInput(Model):
 
 class CommandInput(Model):
     text: str = Field(default='', max_length=3000)
-    kind: Literal['action','talk','finish','hint'] = 'action'
+    kind: Literal['action','object','talk','finish','hint'] = 'action'
     target: str = ''
+    object_action: Literal['','check','take','put','open','close'] = ''
+    check_id: str = ''
     evidence: list[str] = Field(default_factory=list, max_length=30)
     suspect: str = ''
     confirmed: bool = False

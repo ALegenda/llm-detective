@@ -404,6 +404,9 @@ def command(aid:str,body:CommandInput,request:Request,user=Depends(authenticate)
         if con.execute("SELECT id FROM commands WHERE attempt_id=? AND status IN ('queued','running')",(aid,)).fetchone():raise HTTPException(409,'Предыдущее действие ещё выполняется.')
         if body.kind=='finish' and (not body.confirmed or len(body.text.strip())<20):raise HTTPException(422,'Подтвердите раскрытие решения и опишите свою версию.')
         if body.kind in ['action','talk'] and not body.text.strip():raise HTTPException(422,'Опишите действие или задайте вопрос.')
+        if body.kind=='object':
+            try:world.object_step(json.loads(owned_case(a['case_id'],user)['blueprint']),json.loads(current['state']),payload)
+            except ValueError as error:raise HTTPException(422,str(error))
         if body.kind=='talk':
             state=json.loads(current['state']);person=state['people'].get(body.target)
             if not person or person['departed'] or person['location']!=state['location']:
