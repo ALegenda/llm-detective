@@ -197,7 +197,7 @@ def test_generation_repairs_saved_draft_with_precise_feedback(game,blueprint):
                 return blueprint
             return {'accepted':True,'issues':[],'routes':['letter then view','view then letter']}
     ai=ControlledAI();worker.generate(j,ai)
-    assert ai.calls==['blueprint','case_review']
+    assert ai.calls==['blueprint','case_review','initial_state_review']
     assert db.one('SELECT status FROM jobs WHERE id=?',(j['id'],))['status']=='done'
 
 
@@ -217,7 +217,7 @@ def test_generation_normalizes_missing_reverse_exit_without_retry(game,blueprint
             return {'accepted':True,'issues':[],'alternative_routes':['letter then view','view then letter'],'reasoning_quality':'fair'}
     ai=ControlledAI();worker.generate(j,ai)
     saved=db.one('SELECT * FROM jobs WHERE id=?',(j['id'],))
-    assert ai.calls==['blueprint','case_review']
+    assert ai.calls==['blueprint','case_review','initial_state_review']
     assert saved['status']=='done' and saved['repair_count']==0
 
 
@@ -234,13 +234,13 @@ def test_generation_reuses_saved_draft_when_new_validator_can_normalize_it(game,
         calls=[]
         def structured(self,category,prompt,context,schema):
             self.calls.append(category)
-            assert category=='case_review'
+            assert category in ['case_review','initial_state_review']
             garden=next(x for x in context['blueprint']['locations'] if x['id']=='l_garden')
             assert garden['exits']==['l_hall']
             assert context['blueprint']['objects'][2]['location']=='l_hall'
             return {'accepted':True,'issues':[],'alternative_routes':['letter then view','view then letter'],'reasoning_quality':'fair'}
     ai=ControlledAI();worker.generate(j,ai)
-    assert ai.calls==['case_review']
+    assert ai.calls==['case_review','initial_state_review']
     assert db.one('SELECT status FROM jobs WHERE id=?',(j['id'],))['status']=='done'
 
 
@@ -259,7 +259,7 @@ def test_structurally_valid_draft_still_rewrites_rejected_plot(game,blueprint):
                 return blueprint
             return {'accepted':True,'issues':[],'alternative_routes':[],'reasoning_quality':'fair'}
     ai=ControlledAI();worker.generate(j,ai)
-    assert ai.calls==['blueprint','case_review']
+    assert ai.calls==['blueprint','case_review','initial_state_review']
 
 
 def test_art_budget_cannot_consume_action_budget(client,monkeypatch):
@@ -368,3 +368,22 @@ def test_old_case_has_public_briefing_without_hidden_solution(client):
     assert [n['id'] for n in briefing['participants']]==['n_ira']
     public=json.dumps(briefing,ensure_ascii=False)
     assert 'Она перенесла' not in public and 'Лжёт' not in public and 'редкий цветок' not in public
+
+
+def test_contradictory_initial_state_returns_to_generation_before_play(game,blueprint):
+    j=queue_job('generate')
+    with db.transaction() as con:
+        con.execute("UPDATE cases SET status='writing' WHERE id='c1'")
+    class ControlledAI:
+        case=db.one('SELECT * FROM cases WHERE id=?',('c1',))
+        def structured(self,category,prompt,context,schema):
+            if category=='blueprint':return blueprint
+            if category=='case_review':return {'accepted':True,'issues':[],'alternative_routes':[],'reasoning_quality':'fair'}
+            assert context['opening_effects']==[{'container':'Стол','reveals':['Письмо']}]
+            return {'accepted':False,'issues':['Missing item remains in supposedly empty container.']}
+    with pytest.raises(InvalidContent):worker.generate(j,ControlledAI())
+    saved=json.loads(db.one('SELECT checkpoint FROM jobs WHERE id=?',(j['id'],))['checkpoint'])
+    assert saved['needs_rewrite'] and saved['draft']
+    assert saved['feedback']==['Missing item remains in supposedly empty container.']
+    assert db.one("SELECT status FROM cases WHERE id='c1'")['status']=='writing'
+    assert len(db.all_rows('SELECT * FROM attempts'))==1

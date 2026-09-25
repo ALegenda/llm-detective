@@ -214,8 +214,10 @@ def accounts_for(b,s,nid,evidence):
 
 def speech_context(b,s,nid,payload):
     n=index(b,'people')[nid]
-    return {'person':{k:n[k] for k in ['id','name','role','personality','interests','knowledge']},
+    return {'person':{k:n[k] for k in ['id','name','role','appearance','personality','interests','knowledge']},
         'accounts':accounts_for(b,s,nid,payload['evidence']),
+        'scene':{'location':index(b,'locations')[s['location']]['name'],
+                 'visible_objects':[{'name':o['name'],'held_by_player':o['id'] in s['inventory'],'open':s['objects'][o['id']]['open']} for o in b['objects'] if visible(o,s)]},
         'state':s['people'][nid] | {'memory':s['people'][nid]['memory'][-24:]}, 'request':payload['text'],
         'shown':[e for e in s['evidence'] if e['id'] in payload['evidence']],
         'shown_objects':[{k:o[k] for k in ['id','name','surface']} for o in b['objects'] if o['id'] in payload['evidence']],

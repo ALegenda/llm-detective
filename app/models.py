@@ -127,6 +127,11 @@ class Blueprint(Model):
     hints: list[str]
 
 
+class StateReview(Model):
+    accepted: bool
+    issues: list[str]
+
+
 class Review(Model):
     accepted: bool
     issues: list[str]
