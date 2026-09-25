@@ -142,7 +142,18 @@ def validate_blueprint(raw):
             break
     missing = {c['id'] for c in checks.values() if c['essential']} - known
     if missing:
-        errors.append('Unreachable essential observations: ' + ','.join(sorted(missing)))
+        blocked=[]
+        for cid in sorted(set(checks)-known):
+            c=checks[cid]
+            reasons=[]
+            if c['object_id'] not in visible: reasons.append('object hidden: '+c['object_id'])
+            if set(c['requires_facts'])-known: reasons.append('missing facts: '+','.join(sorted(set(c['requires_facts'])-known)))
+            if set(c['requires_tools'])-tools: reasons.append('missing tools: '+','.join(sorted(set(c['requires_tools'])-tools)))
+            if c['requires_open'] and c['requires_open'] not in opened: reasons.append('container cannot open: '+c['requires_open'])
+            blocked.append(cid+' ['+'; '.join(reasons)+']')
+        for aid in sorted(set(accounts)-known):
+            blocked.append(aid+' [missing presented evidence: '+','.join(sorted(set(accounts[aid]['requires_evidence'])-(known|tools)))+']')
+        errors.append('Unreachable essential observations: ' + ','.join(sorted(missing)) + '. Blocked dependencies: ' + '; '.join(blocked) + '. Repair the causal dependency chain; do not remove essential clues merely to pass validation.')
     for c in b['truth']['criteria']:
         if not set(c['evidence_ids']) & (known | visible):
             errors.append('No reachable support for solution criterion')

@@ -33,36 +33,40 @@ def generate(job, ai):
     checkpoint=json.loads(job['checkpoint']) if job['checkpoint'] else {}
     raw=checkpoint.get('blueprint')
     feedback=checkpoint.get('feedback',[])
+    revision=checkpoint.get('revision',0)
+    def save(data, *, rejected=False):
+        # A rejected draft must never replay the same cached rewrite forever.
+        db.save_checkpoint(job, data | {'revision':revision + int(rejected)})
     # A deploy can make an old structural draft locally repairable. Revalidate
     # it before paying for another rewrite, unless the semantic case review
     # explicitly required plot changes.
     if not raw and checkpoint.get('draft') and not checkpoint.get('needs_rewrite'):
         try:
             raw=validate_blueprint(checkpoint['draft'])
-        except ValueError:
-            pass
+        except ValueError as error:
+            feedback=[str(error)]
         else:
-            db.save_checkpoint(job,{'blueprint':raw})
+            save({'blueprint':raw})
     if not raw:
-        raw=ai.structured('blueprint',GENERATOR,{'settings':settings,'repair_feedback':feedback,'previous_draft':checkpoint.get('draft')},Blueprint)
-        db.save_checkpoint(job,{'blueprint':raw})
+        raw=ai.structured('blueprint',GENERATOR,{'settings':settings,'repair_feedback':feedback,'previous_draft':checkpoint.get('draft'),'repair_revision':revision},Blueprint)
+        save({'blueprint':raw})
     try:
         b=validate_blueprint(raw)
     except ValueError as e:
-        db.save_checkpoint(job,{'draft':raw,'feedback':[str(e)]})
+        save({'draft':raw,'feedback':[str(e)]},rejected=True)
         raise InvalidContent(str(e))
     review=checkpoint.get('review')
     if not review:
         review=ai.structured('case_review',
             'Audit this fixed detective case for concrete blocking defects. Do not reject merely for a possible preferred plot or stylistic improvement. Early recovery of a stolen object from its CORRECT present hiding place is valid gameplay: it does not solve who/how/why. Never demand a lock, an extra recovery step, a prescribed discovery order, or a delayed finale. A check that finds the object exactly where truth places it is agreement, NOT a contradiction. Historical times can be inferred from authored statements and material records. Two sources may establish a causal conclusion jointly. Reject actual contradictions, impossible mechanics or unavailable essential support. Check: causal consistency, theme adherence, non-spoiler introduction and art, a concrete public briefing that explains the incident and assignment and introduces relevant people without leaking private knowledge, isolated NPC knowledge, actual independent evidence routes, reachable prerequisites, fair warning before loss, and difficulty as reasoning depth. Accept only if playable. Return specific actionable issues on failure and describe 2 concrete evidence routes. Approval is an expert review, not proof of universal solvability.',
             {'blueprint':b,'settings':settings},Review)
-        db.save_checkpoint(job,{'blueprint':b,'review':review})
+        save({'blueprint':b,'review':review})
     if not review['accepted']:
         objection_audit=ai.structured('review_objections',
             'Verify a reviewer’s objections against this fixed case and engine rules. The reviewer can be wrong: do not defer to its verdict. Keep ONLY demonstrable contradictions, unreachable essential facts/items, actual early disclosure of the culprit, or lack of evidence for a required conclusion. For every retained issue identify concrete conflicting authored facts or the inaccessible prerequisite. Early recovery at the correct hiding place is LEGAL and does not establish who/how/why. Never demand locks, a particular discovery order, a confession, delayed recovery, or a more elaborate finale. The player may investigate in any order and infer causality from combined material evidence. Accounts are deliberately fallible testimony, not necessarily objective truth. If no concrete blocking objections survive, accepted=true, issues=[]. Otherwise accepted=false and list only verified blocking defects with actionable corrections.',
             {'blueprint':b,'objections':review['issues']},StateReview)
         if not objection_audit['accepted']:
-            db.save_checkpoint(job,{'draft':b,'feedback':objection_audit['issues'],'needs_rewrite':True})
+            save({'draft':b,'feedback':objection_audit['issues'],'needs_rewrite':True},rejected=True)
             raise InvalidContent('; '.join(objection_audit['issues']))
         review=review|{'accepted':True,'issues':[]}
 
@@ -72,9 +76,9 @@ def generate(job, ai):
             'Audit the ACTUAL INITIAL PLAYABLE STATE against the incident and fixed truth. The object table is the present AFTER the incident. Opening a container immediately reveals all its children. Reject if a missing/stolen item is still in its original supposedly empty container rather than its true present hiding place; if an observation says absent while object state says present; if a check promises a physical effect the engine cannot perform; or if opening/reading an object contradicts the introduction. Verify the player can physically recover any item the objective requires recovering. Early recovery at the correct present hiding place is legal and not a blocking defect; it does not solve who/how/why. Never require locks, delayed recovery, or a prescribed discovery order. Verify no obvious action breaks the causal story. Also reject unfinished introduction sentences. Check concrete contradictions, not preferences. Return accepted and specific actionable issues; never change the story during play.',
             {'blueprint':b,'opening_effects':[{'container':o['name'],'reveals':[child['name'] for child in b['objects'] if child['container']==o['id']]} for o in b['objects'] if any(child['container']==o['id'] for child in b['objects'])]},StateReview)
     if not state_review['accepted']:
-        db.save_checkpoint(job,{'draft':b,'feedback':state_review['issues'],'needs_rewrite':True})
+        save({'draft':b,'feedback':state_review['issues'],'needs_rewrite':True},rejected=True)
         raise InvalidContent('; '.join(state_review['issues']))
-    db.save_checkpoint(job,{'blueprint':b,'review':review,'state_review':state_review})
+    save({'blueprint':b,'review':review,'state_review':state_review})
     with db.transaction() as con:
         if not db.fenced(con,job):return
         # Blueprint is never rewritten after becoming playable.

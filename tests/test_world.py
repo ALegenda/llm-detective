@@ -285,3 +285,12 @@ def test_invalid_graph_references_report_validation_errors_before_traversal(blue
     from app.generation import validate_blueprint
     blueprint['checks'][0][field]=value
     with pytest.raises(ValueError,match=field):validate_blueprint(blueprint)
+
+
+def test_unreachable_clue_reports_causal_blockers(blueprint):
+    blueprint['checks'][0]['requires_facts']=['f_compare']
+    blueprint['checks'][2]['requires_facts']=['f_lock']
+    with pytest.raises(ValueError) as error:validate_blueprint(blueprint)
+    assert 'f_lock [missing facts: f_compare]' in str(error.value)
+    assert 'f_compare [missing facts: f_view]' in str(error.value)
+    assert 'f_view [missing facts: f_lock]' in str(error.value)

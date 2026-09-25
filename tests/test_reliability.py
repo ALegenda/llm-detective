@@ -414,3 +414,25 @@ def test_reviewer_objections_are_verified_before_rewriting_case(game,blueprint,r
         worker.generate(job,ai)
         assert 'initial_state_review' in ai.calls
         assert db.one('SELECT status FROM jobs WHERE id=?',(job['id'],))['status']=='done'
+
+
+def test_repeated_rejected_drafts_get_new_repair_context(game,blueprint):
+    bad=copy.deepcopy(blueprint)
+    bad['checks'][0]['requires_facts']=['f_compare']
+    bad['checks'][2]['requires_facts']=['f_lock']
+    job=queue_job('generate')
+    class ControlledAI:
+        case=db.one('SELECT * FROM cases WHERE id=?',('c1',))
+        revisions=[]
+        def structured(self,category,prompt,context,schema):
+            assert category=='blueprint'
+            self.revisions.append(context['repair_revision'])
+            if context['previous_draft']:
+                assert 'Blocked dependencies' in context['repair_feedback'][0]
+            return bad
+    ai=ControlledAI()
+    for expected in range(3):
+        with pytest.raises(InvalidContent):worker.generate(job,ai)
+        job=db.one('SELECT * FROM jobs WHERE id=?',(job['id'],))
+        assert json.loads(job['checkpoint'])['revision']==expected+1
+    assert ai.revisions==[0,1,2]
