@@ -17,3 +17,4 @@ jobs:
         with:
           node-version: '22'
       - run: node --check static/app.js
+      - run: node --test tests/*.test.mjs
