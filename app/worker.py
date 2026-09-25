@@ -3,6 +3,7 @@ import json
 import logging
 import random
 import threading
+import traceback
 import time
 from pathlib import Path
 from typing import Literal
@@ -324,7 +325,8 @@ def process(job):
         fail_job(job,e)
         if not isinstance(e,(ProviderFailure,InvalidContent)):
             # No request text, credentials or raw provider bodies in application logs.
-            log.error('job_internal_error job=%s exception=%s',job['id'],type(e).__name__)
+            frames=[f'{Path(f.filename).name}:{f.lineno}:{f.name}' for f in traceback.extract_tb(e.__traceback__)]
+            log.error('job_internal_error job=%s exception=%s frames=%s',job['id'],type(e).__name__,' > '.join(frames))
     finally:stop.set()
 
 

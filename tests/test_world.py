@@ -278,3 +278,10 @@ def test_briefing_references_must_be_real_and_unique(blueprint,ids):
     blueprint['briefing']={'objective':'Найти письмо.','known_facts':['Письмо пропало.','Следователь в кабинете.'],'participants':[{'person_id':pid,'status':'contact','context':'Участник дела.'} for pid in ids]}
     with pytest.raises(ValueError,match='Briefing participants'):
         validate_blueprint(blueprint)
+
+
+@pytest.mark.parametrize('field,value',[('reveals_objects',['o_missing']),('requires_tools',['o_missing']),('object_id','o_missing'),('requires_open','o_missing')])
+def test_invalid_graph_references_report_validation_errors_before_traversal(blueprint,field,value):
+    from app.generation import validate_blueprint
+    blueprint['checks'][0][field]=value
+    with pytest.raises(ValueError,match=field):validate_blueprint(blueprint)

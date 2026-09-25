@@ -116,6 +116,10 @@ def validate_blueprint(raw):
     for c in b['truth']['criteria']:
         if not c['evidence_ids'] or set(c['evidence_ids']) - evidence:
             errors.append('Invalid solution support')
+    # Do not traverse an invalid graph: an unknown reveal id would otherwise
+    # enter visible and crash the next tools lookup with KeyError, bypassing repair.
+    if errors:
+        raise ValueError('; '.join(dict.fromkeys(errors)))
     # Optimistic reachability checks prerequisites, containers, tools and reveal edges.
     visible = {o['id'] for o in objects.values() if o['visible'] and not o['container']}
     known, opened = set(), set()
