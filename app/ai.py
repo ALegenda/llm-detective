@@ -76,6 +76,8 @@ class AI:
         authoring=category.startswith('story_')
         model=config.STORY_MODEL if authoring else config.TEXT_MODEL
         options={'reasoning':{'effort':config.STORY_REASONING}} if authoring else ({'reasoning':{'effort':config.TEXT_REASONING}} if model.startswith('gpt-6') else {})
+        if category in ['dialogue','dialogue_audit'] and model.startswith(('gpt-6','gpt-5.4')):
+            options={'reasoning':{'effort':config.DIALOGUE_REASONING}}
         cache_key=db.digest({'prompt_version':config.PROMPT_VERSION,'category':category,'instructions':instructions,'context':context,'model':model,'options':options,'schema':model_type.model_json_schema(),'images':[db.digest(base64.b64encode(i).decode()) for i in images or []]})
         cached=db.one("SELECT response FROM operations WHERE job_id=? AND cache_key=? AND status='done' AND response IS NOT NULL ORDER BY created DESC LIMIT 1",(self.job['id'],cache_key))
         if cached:

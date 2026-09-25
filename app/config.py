@@ -15,6 +15,7 @@ TEXT_MODEL = os.getenv('OPENAI_TEXT_MODEL', 'gpt-6-luna')
 STORY_MODEL = os.getenv('OPENAI_STORY_MODEL', 'gpt-6-luna')
 STORY_REASONING = os.getenv('OPENAI_STORY_REASONING', 'medium')
 TEXT_REASONING = os.getenv('OPENAI_TEXT_REASONING', 'none')
+DIALOGUE_REASONING = os.getenv('OPENAI_DIALOGUE_REASONING', 'low')
 IMAGE_MODEL = os.getenv('OPENAI_IMAGE_MODEL', 'gpt-image-2.5-flare')
 PRODUCTION = os.getenv('APP_ENV') == 'production'
 # Render sets RENDER_EXTERNAL_URL (https://….onrender.com); prefer explicit APP_ORIGIN.
