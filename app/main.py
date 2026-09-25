@@ -339,6 +339,7 @@ def case_details(cid:str,user=Depends(authenticate)):
     cp=json.loads(job['checkpoint']) if job and job['checkpoint'] else {}
     result['stage']='ready' if c['status']=='ready' else (cp.get('stage','outline') if cp.get('pipeline_version')==2 else ('review' if 'blueprint' in cp else 'writing'))
     if result['stage']=='reader':result['stage']='reading'
+    if result['stage']=='adjudication':result['stage']='audit'
     result['generation_version']=cp.get('pipeline_version',1)
     result['error']=job['error_code'] if job and job['status']=='failed' else None
     result['jobs']=db.all_rows('SELECT kind,status,count(*) AS count FROM jobs WHERE case_id=? GROUP BY kind,status',(cid,))

@@ -100,7 +100,7 @@ class FakeAuthor:
             raise ProviderFailure('provider_connection_unknown',True)
         result={'story_outline':self.outline,'story_world':make_plan(),'story_script':make_script(),
                 'story_reader':{'culprits':['n_1'],'method':'Переложено','motive':'Скрыть время','reasoning':'Документы сходятся','supporting_evidence':['f_1','f_2'],'unresolved_ambiguities':[]},
-                'story_audit':{'issues':self.audit_issues,'strengths':['Материальные маршруты']}}[category]
+                'story_audit':{'issues':self.audit_issues,'strengths':['Материальные маршруты']},'story_adjudication':{'blocking_issue_indices':list(range(len(self.audit_issues))),'reasoning':'Verified'}}[category]
         return schema.model_validate(result).model_dump()
 
 
@@ -164,3 +164,16 @@ def test_new_pipeline_repair_budget_is_per_stage_and_globally_bounded(game,revis
     db.save_checkpoint(j,{'pipeline_version':2,'revision':revision,'stage':'world','rejections':{'world':stage_rejections}})
     worker.fail_job(j,InvalidContent('test'))
     assert db.one('SELECT status FROM jobs WHERE id=?',(j['id'],))['status']==('retry' if retry else 'failed')
+
+
+def test_unfounded_audit_objection_does_not_rewrite_a_playable_story(game,outline):
+    j=queue_job('generate');ai=FakeAuthor(outline)
+    ai.audit_issues=[{'stage':'outline','target':'container','contradiction':'Item in container and room','correction':'Add a redundant sentence'}]
+    original=ai.structured
+    def adjudicate(category,prompt,context,schema):
+        if category=='story_adjudication':return {'blocking_issue_indices':[],'reasoning':'Containment is transitive, no conflicting facts.'}
+        return original(category,prompt,context,schema)
+    ai.structured=adjudicate
+    _,review=build(j,ai,SETTINGS)
+    assert review['accepted']
+    assert ai.calls.count('story_outline')==1

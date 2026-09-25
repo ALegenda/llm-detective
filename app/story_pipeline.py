@@ -115,6 +115,10 @@ class RepairIssue(Model):
     contradiction: str
     correction: str
 
+class AuditResolution(Model):
+    blocking_issue_indices: list[int]
+    reasoning: str
+
 class StoryAudit(Model):
     issues: list[RepairIssue]
     strengths: list[str]
@@ -282,7 +286,7 @@ def build(job, ai, settings):
         cp['revision']+=1
         cp.setdefault('rejections',{})[stage]=cp.get('rejections',{}).get(stage,0)+1
         # A repair reruns its stage and dependants, never unrelated finished work.
-        dependencies={'outline':['outline','world','script','blueprint','certificate','reader','audit'], 'world':['world','script','blueprint','certificate','reader','audit'], 'script':['script','blueprint','reader','audit']}
+        dependencies={'outline':['outline','world','script','blueprint','certificate','reader','audit','adjudication'], 'world':['world','script','blueprint','certificate','reader','audit','adjudication'], 'script':['script','blueprint','reader','audit','adjudication']}
         cp.setdefault('drafts',{})[stage]=cp.get(stage)
         for key in dependencies[stage]:cp.pop(key,None)
         save(stage)
@@ -314,6 +318,13 @@ def build(job, ai, settings):
         {'briefing':b['introduction'],'assignment':b['briefing'],'people':[{k:p[k] for k in ['id','name','role']} for p in b['people']], 'observations':[{'id':c['id'],'source':world.index(b,'objects')[c['object_id']]['name'],'text':c['result']} for c in b['checks']]},reader_schema(b))
     audit=stage_call('audit','story_audit',AUDIT_PROMPT,{'outline':outline,'blueprint':b,'independent_reader':reader,'mechanical_proof':{'orders_tested':2,'all_material_clues_acquired':True,'required_items_recovered':True}},StoryAudit)
     issues=audit['issues']
+    if issues:
+        resolution_schema=create_model('VerifiedAuditIssues',__base__=AuditResolution,
+            blocking_issue_indices=(list[Literal.__getitem__(tuple(range(len(issues))))],...))
+        resolution=stage_call('adjudication','story_adjudication',
+            'Independently adjudicate alleged story defects. The critic is NOT authoritative and may invent contradictions. Retain an issue ONLY if you can identify mutually incompatible concrete authored facts, actual omniscient knowledge, actual culprit leakage, or an essential inference lacking observable support. Restate the two incompatible facts and why they cannot both hold. A container inside a box in a room is transitive containment, NOT competing hiding places. A statement naming a room and another naming a container IN THAT SAME ROOM are compatible. Moving the container moves its contents; no extra sentence is needed. Time-ordered changes are not simultaneous contradictions. Omitting redundant detail is not a defect. A lie by a witness is not a truth contradiction. The real engine already certified all physical acquisition paths; early recovery and any investigation order are legal. Reject demands for locks, extra delay, overexplicit phrasing, or stylistic preferences. Select only the indices of genuinely blocking issues. Empty list is expected when objections are unfounded. Do not invent new objections.',
+            {'outline':outline,'blueprint':b,'alleged_issues':issues,'independent_reader':reader},resolution_schema)
+        issues=[issues[i] for i in sorted(set(resolution['blocking_issue_indices']))]
     if set(reader['culprits'])!=set(b['truth']['culprits']) and not any(i['stage']=='outline' for i in issues):
         issues=issues+[{'stage':'outline','target':'identity evidence','contradiction':'Independent reader selected '+','.join(reader['culprits'])+' from obtainable evidence, expected '+','.join(b['truth']['culprits']),'correction':'Clarify independent material evidence distinguishing the actual culprit; preserve causal truth.'}]
     if issues:
