@@ -16,6 +16,8 @@ def outline():
         'public_incident':'Исчезло письмо. Три свидетеля ждут в порту.', 'missing_item_name':'Источник 6','missing_item_clue_index':6, 'event':'Исчезновение письма', 'culprit_indices':[0],
         'method':'Письмо переложено в коробку','motive':'Скрыть перенос встречи','timeline':['08:00 письмо получено','08:10 встреча перенесена','08:20 письмо скрыто','08:30 обнаружена пропажа'],
         'explanation':'Ирина скрыла письмо с новым временем встречи.','dramatic_question':'Почему письмо исчезло?','fair_reversal':'Опоздание оказалось намеренным.',
+        'discoveries':[{'initial_interpretation':'Письмо потерялось','clue_indices':[0,1],'revised_interpretation':'Письмо спрятано'},
+                       {'initial_interpretation':'Скрывают содержание письма','clue_indices':[2,3],'revised_interpretation':'Скрывают время встречи'}],
         'places':[{'name':name,'description':name,'atmosphere':'Туман','image_prompt':'Empty architecture','travel_minutes':2} for name in ['Контора','Причал','Мастерская']],
         'cast':[{'name':name,'occupation':'Смотритель','appearance':'Взрослый человек','personality':'Сдержанный','interests':'Работа','location_index':i,'knowledge':['Встреча в 18:00.'],'innocent_secret':''} for i,name in enumerate(['Ирина','Лев','Анна'])],
         'clues':[{'source_name':'Источник '+str(i),'source_surface':'Закрытый документ '+str(i),'source_image_prompt':'Closed paper','location_index':i%3,'portable':i==6,'container_path':['Сейф'] if i==0 else ['Коробка','Чехол'] if i==6 else [],'source_kind':'artifact' if i==6 else 'document','method':'compare' if i==3 else 'read','focus':'запись '+str(i),'observation':'На документе '+str(i)+' указана встреча в 18:00.','significance':'Устанавливает время'} for i in range(7)],
@@ -160,6 +162,7 @@ class FakeAuthor:
             self.fail_once=None
             raise ProviderFailure('provider_connection_unknown',True)
         result={'story_outline':self.outline,'story_world':make_plan(),'story_script':make_script(),
+                'story_contract_audit':{key:{'passed':True,'stage':'script','reason':'Grounded'} for key in ['continuity','discoveries']+[f'f_{i+1}' for i in range(7)]+[f'n_{i+1}' for i in range(3)]},
                 'story_reader':{'culprits':['n_1'],'method':'Переложено','motive':'Скрыть время','reasoning':'Документы сходятся','supporting_evidence':['f_1','f_2'],'unresolved_ambiguities':[],'identity_resolved':True,'method_resolved':True,'motive_resolved':True},
                 'story_fact_audit':{'issues':[],'strengths':[]},
                 'story_audit':{'issues':self.audit_issues,'strengths':['Материальные маршруты']},'story_adjudication':{'blocking_issue_indices':list(range(len(self.audit_issues))),'reasoning':'Verified'}}[category]
@@ -201,11 +204,11 @@ def test_worker_publishes_only_certified_new_pipeline_and_keeps_proof_private(cl
     worker.generate(j,ai)
     row=db.one("SELECT * FROM cases WHERE id='c1'")
     assert row['status']=='ready'
-    assert json.loads(row['blueprint'])['_meta']['generation_version']==8
+    assert json.loads(row['blueprint'])['_meta']['generation_version']==9
     assert json.loads(row['review'])['mechanical_proof']['clues_acquired']==7
     public=client.get('/api/cases/c1').json()
     assert 'certificate' not in public and 'outline' not in public and 'truth' not in public
-    assert public['generation_version']==8 and public['stage']=='ready'
+    assert public['generation_version']==9 and public['stage']=='ready'
 
 
 def test_wrong_independent_solution_cannot_publish_even_if_auditor_misses_it(game,outline):
@@ -356,3 +359,41 @@ def test_fact_audit_is_scoped_to_observation_inputs_and_repaired_with_script(gam
 def test_public_cast_fields_cannot_disclose_guilt_before_play(outline,field):
     outline['cast'][0][field]='Реставратор; виновник кражи'
     with pytest.raises(ValueError,match='guilt label'):validate_outline(outline,SETTINGS)
+
+
+@pytest.mark.parametrize('target,stage', [('f_2','script'),('n_2','outline'),('continuity','outline'),('discoveries','outline')])
+def test_contract_failure_blocks_publication_before_general_audit(game,outline,target,stage):
+    j=queue_job('generate');ai=FakeAuthor(outline);original=ai.structured
+    def review(category,prompt,context,schema):
+        result=original(category,prompt,context,schema)
+        if category=='story_contract_audit':
+            result[target]={'passed':False,'stage':stage,'reason':'Specific input is missing; restore it at its source.'}
+        return result
+    ai.structured=review
+    with pytest.raises(InvalidContent,match=target):build(j,ai,SETTINGS)
+    cp=json.loads(db.one('SELECT checkpoint FROM jobs WHERE id=?',(j['id'],))['checkpoint'])
+    assert cp['stage']==stage and 'blueprint' not in cp and 'contracts' not in cp
+    assert 'story_adjudication' not in ai.calls and 'story_reader' not in ai.calls
+    if stage=='script':
+        assert 'outline' in cp and 'world' in cp and 'certificate' in cp
+    ai.structured=original
+    _,report=build(db.one('SELECT * FROM jobs WHERE id=?',(j['id'],)),ai,SETTINGS)
+    assert report['accepted']
+    assert ai.calls.count('story_contract_audit')==2
+
+
+def test_contract_audit_must_cover_every_source_and_character(outline):
+    from app.story_pipeline import contract_schema
+    b=compile_world(outline,make_plan(),make_script())
+    schema=contract_schema(b)
+    values={key:{'passed':True,'stage':'script','reason':'Grounded'} for key in schema.model_fields}
+    del values['n_3']
+    with pytest.raises(ValidationError):schema.model_validate(values)
+
+
+@pytest.mark.parametrize('problem',['unknown','duplicate','unchanged'])
+def test_discovery_plan_cannot_claim_unsupported_or_duplicate_progress(outline,problem):
+    if problem=='unknown':outline['discoveries'][0]['clue_indices']=[999]
+    elif problem=='duplicate':outline['discoveries'][1]['clue_indices']=[0,1]
+    else:outline['discoveries'][0]['revised_interpretation']=outline['discoveries'][0]['initial_interpretation']
+    with pytest.raises(ValueError,match='discover'):validate_outline(outline,SETTINGS)

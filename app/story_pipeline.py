@@ -13,7 +13,7 @@ from .ai import InvalidContent
 from .models import Model, Location, Thing, Check, Account, Blueprint
 from .generation import validate_blueprint
 
-VERSION = 8
+VERSION = 9
 
 class Place(Model):
     name: str
@@ -50,6 +50,11 @@ class Conclusion(Model):
     description: str
     clue_indices: list[int] = Field(min_length=2, max_length=5)
 
+class DiscoveryTurn(Model):
+    initial_interpretation: str
+    clue_indices: list[int] = Field(min_length=1, max_length=4)
+    revised_interpretation: str
+
 class MysteryOutline(Model):
     title: str
     subtitle: str
@@ -67,6 +72,7 @@ class MysteryOutline(Model):
     explanation: str
     dramatic_question: str
     fair_reversal: str
+    discoveries: list[DiscoveryTurn] = Field(min_length=2, max_length=2, description='Two distinct evidence-driven changes/refinements of a plausible working explanation, not mandatory player order or mere collection milestones.')
     places: list[Place] = Field(min_length=3, max_length=5)
     cast: list[CastMember] = Field(min_length=3, max_length=5)
     clues: list[Clue] = Field(min_length=7, max_length=16)
@@ -139,6 +145,26 @@ class StoryAudit(Model):
     issues: list[RepairIssue]
     strengths: list[str]
 
+class ContractCheck(Model):
+    passed: bool
+    stage: Literal['outline','script']
+    reason: str = Field(description='Cite the exact authored fact or missing input behind a failure, with a minimal repair. For a pass cite concrete supporting content.')
+
+def contract_schema(b):
+    # Required named fields prevent an audit from silently omitting a source or
+    # a minor character. These execution contracts cannot be waived by the
+    # general literary adjudicator.
+    return create_model('ExperienceContracts',__base__=Model,
+        continuity=(ContractCheck,...),discoveries=(ContractCheck,...),
+        **{c['id']:(ContractCheck,...) for c in b['checks']},
+        **{p['id']:(ContractCheck,...) for p in b['people']})
+
+CONTRACT_PROMPT = '''Verify each required contract, using concrete authored facts rather than a numeric quality rating.
+For EACH f_N, check only its own observation_contract inputs. An inspect/read must describe this source alone; it cannot say an address/signature matches an unread other document. Quote the actual address/signature/mark instead. Comparing two sources requires their declared prior_observations; being supplied elsewhere in this audit is NOT a player prerequisite. Experiments use their listed instrument and cannot preselect the player's clock time. Do not require a prerequisite merely to read a document which itself quotes another source. Distinguish what a document CLAIMS from what the narrator asserts as independently verified. On failure stage=outline if author_intended_observation already has the defect, otherwise script. Do not remove useful source details to hide a contradiction.
+For EACH n_N, verify that knowledge/accounts cover their OWN recent actions visible in the timeline or attributed records: what they did/saw and why they deliberately did it. A culprit may have a coherent authored lie or refusal, but innocent routine actions need an actual explanation, not blanket evasion or artificial amnesia. At least one available ungated account per person must add a specific relevant personal observation or explanation rather than only repeating a document or saying they do not know. No omniscient knowledge. If personal memory is absent repair outline; if known facts are absent from usable accounts repair script. Do not demand a confession or an answer about events the person never witnessed.
+continuity: the actual causal ending must reconcile the timeline, present object locations and objective records. For example, a record claiming accepted physical shipment versus the item still in its hiding box requires an authored, obtainable explanation (prebooking, false receipt, return, etc.), not merely downgrading the event to paperwork in the final answer. An unimportant omission is fine; an explicit conflicting event is not. Put causal/source defects in outline. Do not require proof of every hand movement, delay recovery or forbid transitive containment.
+discoveries: verify both planned changes of interpretation have concrete obtainable evidence and are distinct. Neither may merely restate the initial assignment or require a new fact introduced only by the final truth. A refinement rather than a dramatic twist is valid. Respect the requested difficulty; hard needs competing plausible causal explanations distinguished by chronology and material comparison. Repair outline for absent or unsupported development. This checks specific authoring contracts, not subjective enjoyment; do not reject stylistic preferences.'''
+
 OUTLINE_PROMPT = '''Design a compelling fair mystery as CAUSES AND EVIDENCE, not game code. Follow the user's theme materially: local geography/history/occupation must affect method and evidence. All player-facing text in settings.language. Short: 3 places, 3 people, 7-9 clues; standard: 4/4/10-12; long: 5/5/13-16. Place 0 is a hub connected to every other place; all places accessible from start. No other place-to-place direct exits. Cast stays available, no timed escape or mandatory confession. The player is a SEPARATE visiting investigator; never turn the player into an NPC or assign a cast member the role of the player leading this investigation.
 First establish a coherent past: who did what, how, when, why, and where any missing object is NOW. Then derive physical evidence from that past. Fix each source container_path as the CURRENT physical enclosure chain (outermost first), with exact distinct container names; use [] for exposed objects, exterior marks and architectural traces on floors/walls. A source on/next to a cabinet is NOT inside it. A hidden artifact must name its actual hiding enclosure in this structured path as well as the causal story. Use at most three unique container names across the entire story, consistent rooms and nesting. Each clue is an observation of a physical source: a document, trace, device or recovered object. Multiple checks may act on the SAME physical source: reuse its exact name, location, container_path, source_kind, portable flag, surface and image prompt. Inspecting a sample and later testing it does not create a new sample or a convenient expert report. Short/standard/long need at least 5/7/9 distinct physical sources; two checks on the same source do not count as independent proof. Clues have explicit readable times/names/physical details. observation contains ONLY what can actually be perceived/read/tested, not omniscient motives, route deductions or declaring guilt. significance is PRIVATE design reasoning. method is inspect/read/compare/experiment. focus is a concise NOUN PHRASE about the visible feature, not an infinitive or hidden finding. The compiler supplies action verbs. A source is the ACTUAL document, artifact, trace or fixture being observed, never a container whose contents you merely describe. Containers are created separately by the world planner. Opening a pouch to find an artifact requires an ARTIFACT source wrapped in a pouch container, never a check pretending to open it. Each experiment needs a real portable instrument; each comparison needs two earlier observations. source_surface is exterior only, never hidden writing or current holder/location; source name/appearance must not reveal a hidden conclusion. Locations are present AFTER the incident. If something is missing, set missing_item_name to that actual object (e.g. bronze tablet, NOT its pouch/box) and missing_item_clue_index to the dedicated artifact clue. That clue source_name must equal missing_item_name, source_kind=artifact, portable=true. For no missing item use empty name and null index. Its location is the true CURRENT hiding place, never its supposedly empty old container. Recovery is allowed early and does not itself solve the case.
 Write exactly one conclusion with aspect=identity, one with aspect=method, one with aspect=motive, plus at most two non-overlapping aspect=detail conclusions. Never merge method and motive in one grading criterion. Every conclusion must have >=2 DISTINCT independent material sources. Use zero-based clue_indices. Motive must be inferable from available records/actions, never only private_context or confession. Every decisive assertion has a support route. Required conclusions must stop at what observations actually establish: distinguish responsibility for ordering an act from personally performing every movement. Do not require the player to prove an exact physical executor or unobservable key-turn merely because omniscient backstory happens to name one. Either author independent observable support for that necessary detail or keep it out of the required solution. An alternative suspect must have a plausible innocent secret that explains their misleading conduct. fair_reversal must be earned by evidence, not information withheld from the player. Avoid generic identical guilty/innocent templates. Difficulty controls inference depth, not keys or clue count. Easy: one plausible alternative, explicit time/identity links, one short comparison chain. Medium: two plausible alternatives with independent ways to eliminate them. Hard: at least two initially plausible causal explanations, requiring cross-source chronology and a meaningful material comparison to distinguish; no single confession, receipt naming the culprit or final document may simply state the whole solution. In every difficulty, two discoveries should revise a plausible working hypothesis. A useful conversation must clarify an apparent contradiction through this person's own experience, without being required to unlock material proof. Require at least 1/2/3 meaningful player comparisons or experiments for short/standard/long. A long case includes an actual material experiment using a real instrument. Prefer examining original specimens, marks or mechanisms over reading pre-existing comparison sheets. Comparative results should arise from the player comparing earlier observations, not from magically finding a report assembled specifically for this investigation. Put prerequisite observations earlier than comparisons in clue order. Do not require consumable/destructive actions or unsupported physical effects: a check observes only; opening/taking are separate engine actions.
@@ -163,6 +189,10 @@ AUDIT_PROMPT += '''\nAn unresolved core ending is blocking, not a stylistic pref
 
 OUTLINE_PROMPT += '\nA player-performed experiment has no predetermined wall-clock timestamp: the player chooses when to run it. Describe measured values only; the engine records the actual action time. Historical dated measurements belong in separate readable documents, never as the timestamp of the player’s new experiment.'
 SCRIPT_PROMPT += '\nNever stamp a player-performed experiment with a fixed clock time. The engine supplies its actual time. Preserve historical timestamps only in their original documentary sources.'
+
+
+OUTLINE_PROMPT += '''\nPlan discoveries explicitly: two different plausible initial interpretations and the exact clue_indices that revise/refine each. These are possible reasoning paths, not a forced order. The second must add understanding beyond the first. Give every cast member concrete memories of their own case-relevant recent actions, the reasons for their deliberate choices, and a useful personal contribution beyond repeating a document. Innocent routine decisions should have ordinary explanations, not mystery by universal refusal. A culprit's knowledge must distinguish actual memory from the coherent story they choose to tell. Reconcile every objective record with present physical state: booking a shipment is different from carrier acceptance, a planned payment from a settled transfer, a reservation from actual attendance. If a record is false or an event was reversed, make that discoverable; do not leave a contradiction unexplained in the ending. Local read/inspect results give literal source facts; matching another source belongs only to a separate comparison.'''
+SCRIPT_PROMPT += '''\nMake each person's useful personal contribution available without evidence gates: a concrete observation or explanation of their own routine conduct. Include the actual reason for their own choices where it is authored; do not turn gaps into amnesia or blanket refusal. Maintain one coherent public account per person. If a guilty person lies, do not both disclose the true deal and deny that same deal in a single answer. Observation results must remain source-local: a document gives its literal names, address, dates and claims, never an unsupported comparison with another unrequired source.'''
 
 
 def validate_experiment_time(method, text, target):
@@ -202,6 +232,15 @@ def validate_outline(raw, settings):
             placements[name]=position
     if len(placements)>3:errors.append('Use at most three physical containers across all container_path chains')
     names=[c['source_name'].strip().casefold() for c in o['clues']]
+    discovery_sets=[]
+    for i,d in enumerate(o['discoveries']):
+        refs=d['clue_indices']
+        if len(set(refs))!=len(refs) or any(j<0 or j>=len(o['clues']) for j in refs):
+            errors.append(f'discoveries[{i}] must reference distinct existing zero-based clue_indices')
+        if not d['initial_interpretation'].strip() or not d['revised_interpretation'].strip() or d['initial_interpretation'].strip().casefold()==d['revised_interpretation'].strip().casefold():
+            errors.append(f'discoveries[{i}] must actually change or refine an interpretation')
+        discovery_sets.append(set(refs))
+    if discovery_sets[0]==discovery_sets[1]:errors.append('Two discoveries must have distinct evidence routes')
     verdict_label=r'\b(?:подмен[её]нн\w*|поддельн\w*|фальшив\w*|украденн\w*|похищ[её]нн\w*|настоящ(?:ий|ая|ее|ие|его|ей|их|ую)|подлинн(?:ый|ая|ое|ые|ого|ой|ых|ую)|substituted|counterfeit|genuine|stolen)\b'
     identities={}
     for i,c in enumerate(o['clues']):
@@ -418,7 +457,7 @@ def build(job, ai, settings):
         # A repair reruns its stage and dependants, never unrelated finished work.
         dependencies={'outline':['outline','world','script','blueprint','certificate','reader','audit','adjudication'], 'world':['world','script','blueprint','certificate','reader','audit','adjudication'], 'script':['script','blueprint','reader','audit','adjudication']}
         cp.setdefault('drafts',{})[stage]=cp.get(stage)
-        for key in dependencies[stage]+['fact_audit']:cp.pop(key,None)
+        for key in dependencies[stage]+['fact_audit','contracts']:cp.pop(key,None)
         save(stage)
         raise InvalidContent(stage+': '+'; '.join(feedback))
     def stage_call(stage,category,prompt,context,schema):
@@ -449,6 +488,17 @@ def build(job, ai, settings):
         'author_intended_observation':outline['clues'][i]['observation'],
         'prior_observations':[p['result'] for p in b['checks'] if p['id'] in c['requires_facts']],
         'tools':[world.index(b,'objects')[t]['name'] for t in c['requires_tools']]} for i,c in enumerate(b['checks'])]
+    readiness=stage_call('contracts','story_contract_audit',CONTRACT_PROMPT,
+        {'truth':b['truth'],'observations':contracts,'people':b['people'],
+         'discoveries':outline['discoveries'],'opening':b['introduction'],
+         'current_objects':[{k:o[k] for k in ['id','name','location','container']} for o in b['objects']]},contract_schema(b))
+    failed={key:value for key,value in readiness.items() if not value['passed']}
+    if failed:
+        for target in ['outline','script']:
+            feedback=[key+': '+value['reason'] for key,value in failed.items() if value['stage']==target]
+            if feedback:cp.setdefault('feedback',{})[target]=feedback
+        target='outline' if any(v['stage']=='outline' for v in failed.values()) else 'script'
+        reject(target,cp['feedback'][target])
     facts=stage_call('fact_audit','story_fact_audit',
         'Check EACH objective observation locally against the fixed past and its own execution inputs. This is a focused factual audit, not a review of dramatic quality. Compare every explicit clock time with the timeline: an object cannot be objectively recorded present after it was removed unless the record is explicitly established as false with obtainable support. An inspect/read must not compare with another undiscovered source; only declared prior_observations are available. A measurement must quote a written value or use the listed instrument. Flag concrete incompatible claims, never speculative extra requirements. Identify f_N and quote the exact two conflicting assertions. If the intended observation itself contradicts the past, stage=outline; if the rewritten result introduces the contradiction or unsupported comparison, stage=script. No world issues. Keep all source facts that are already consistent.',
         {'fixed_past':b['truth'],'opening':b['introduction'],'observations':contracts},StoryAudit)

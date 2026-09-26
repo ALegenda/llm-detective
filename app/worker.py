@@ -20,6 +20,8 @@ AUDITOR='''Check whether NPC reply is grounded in provided allowed knowledge/acc
 
 
 INTERPRETER+=''' When the player wants to compare or reconcile ALREADY RECORDED observations, use compare with evidence_ids selecting the relevant existing world.evidence entries (at least two). This presents their exact text together without new facts or physical action. Do not substitute a done inspection of one object for comparing several records. A genuinely new physical test still requires an available authored check. Unknown observations cannot be compared; carry out an explicitly requested accessible check or clarify what is missing. Leave evidence_ids empty for all other actions.'''
+SPEAKER+=''' The shown array contains actual evidence presented in this turn, not mere player assertions. When it is nonempty, address the specific relevant contents; never dismiss them as only a mention or say you have not been shown them. You may dispute what they imply, identify an authored limitation, lie consistently with your authored public account, or explicitly refuse. Give relevant allowed personal knowledge before a refusal where possible; do not substitute generic uncertainty for an available answer.'''
+AUDITOR+=''' If context.shown contains records, a reply dismissing those same records as unshown or a mere verbal mention contradicts the context and fails grounded. A refusal or disagreement with their interpretation is still valid. If a direct answer about ordinary personal conduct exists in allowed knowledge/accounts, replacing it entirely with unrelated uncertainty fails answers_question.'''
 
 
 def complete(con,job):
