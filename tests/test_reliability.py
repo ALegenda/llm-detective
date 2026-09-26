@@ -323,6 +323,12 @@ def test_finish_pipeline_persists_rubric_grounded_verdict(client,game):
     world.add_evidence(s,'f_found_o_letter','Место обнаружения','Письмо найдено внутри стола.','observation','Письмо')
     s['evidence'][-1]['discovery']=True
     with db.transaction() as con:con.execute('UPDATE attempts SET state=? WHERE id=?',(db.encode(s),'a1'))
+    public_actions=[{'intent':'Открыть стол','messages':['Открыто: Стол. Теперь доступно письмо.']},
+                    {'intent':'Сломать дверь','messages':['Неподдерживаемое действие. Дверь остаётся целой.']}]
+    with db.transaction() as con:
+        for action in public_actions:
+            con.execute('INSERT INTO events(attempt_id,version,minute,kind,public,private,created) VALUES(?,?,?,?,?,?,?)',
+                        ('a1',0,0,'action',db.encode(action),db.encode({'secret':'PRIVATE_MUTATION_MUST_NOT_LEAK'}),0))
     response=client.post('/api/attempts/a1/commands',json={'kind':'finish','text':explanation,'evidence':evidence,'confirmed':True,'version':0},headers={'Idempotency-Key':'finish-rubric'})
     assert response.status_code==202
     job=db.claim()
@@ -332,6 +338,9 @@ def test_finish_pipeline_persists_rubric_grounded_verdict(client,game):
             assert category=='evaluation'
             assert context['public_dialogue']==s['dialogue']
             assert context['public_discoveries']==[s['evidence'][-1]]
+            assert context['public_action_history']==[{'minute':0,'request':a['intent'],'result':a['messages']} for a in public_actions]
+            assert 'PRIVATE_MUTATION_MUST_NOT_LEAK' not in db.encode(context)
+            assert 'request alone proves nothing' in prompt
             assert 'f_found_o_letter' not in evidence
             assert 'NEVER proves that a speaker told the truth' in prompt
             raw={'claims':[{'quote':explanation,'status':'accurate','feedback':'Верно'}],

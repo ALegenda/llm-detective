@@ -216,9 +216,14 @@ def prepare_command(job,ai):
         evidence=world.cited_evidence(s,payload['evidence'])
         evaluation=checkpoint.get('evaluation')
         if not evaluation:
+            public_actions=[]
+            for event in db.all_rows('SELECT minute,public FROM events WHERE attempt_id=? AND kind=? ORDER BY id',(attempt['id'],'action')):
+                visible=json.loads(event['public'])
+                public_actions.append({'minute':event['minute'],'request':visible.get('intent',''),'result':visible.get('messages',[])})
             raw_evaluation=ai.structured('evaluation',
-                EVALUATOR+' Public dialogue is an exact record of what the player heard, including refusals omitted from notebook excerpts. It supports claims about what was said, NEVER proves that a speaker told the truth, performed an act or had a motive. A player question is not evidence. Do not call an actually recorded refusal unobserved merely because it has no separate notebook entry. Cite human-readable source names and titles in prose; evidence_ids fields alone use internal IDs.',
+                EVALUATOR+' Public dialogue is an exact record of what the player heard, including refusals omitted from notebook excerpts. It supports claims about what was said, NEVER proves that a speaker told the truth, performed an act or had a motive. A player question is not evidence. Do not call an actually recorded refusal unobserved merely because it has no separate notebook entry. public_action_history contains the same completed action results the player saw. A successful engine result confirms that the player opened/took/tested that object; do not mark that witnessed action unsupported because its notebook entry only describes the finding. The request alone proves nothing: failed actions and refusals are not successful actions. Quoted NPC statements inside action results remain testimony, not objective truth. No extra notebook checkbox is needed to establish an actual recorded player action. Cite human-readable source names and titles in prose; evidence_ids fields alone use internal IDs.',
                 {'truth':b['truth'],'rubric':evaluation_rubric(b['truth']),'people':[{k:n[k] for k in ['id','name']} for n in b['people']], 'explanation':payload['text'],'suspect':payload['suspect'],
+                 'public_action_history':public_actions,
                  'cited':[e for e in s['evidence'] if e['id'] in evidence],'public_discoveries':[e for e in s['evidence'] if e.get('discovery')], 'public_dialogue':s.get('dialogue',[]),'consequences':s['consequences'],'language':settings['language'],'repair_feedback':checkpoint.get('evaluation_feedback',[]),'previous_draft':checkpoint.get('evaluation_draft')},evaluation_schema(payload['text'],evidence,len(evaluation_rubric(b['truth']))))
             try:evaluation=grounded_evaluation(raw_evaluation,payload['text'],evidence,evaluation_rubric(b['truth']),settings['language'])
             except InvalidContent as error:
