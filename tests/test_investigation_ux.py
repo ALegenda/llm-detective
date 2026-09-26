@@ -140,7 +140,10 @@ def test_repeat_search_can_recover_an_object_hidden_again(game):
     assert not world.available_checks(b,s,'o_desk')[0]['done']
     after,result,_=world.reduce(b,s,[step('check','o_desk','f_lock')],P)
     assert after['objects']['o_key']['visible']
-    assert result['minutes']==2 and result['evidence_ids']==[]
+    assert result['minutes']==2 and result['evidence_ids']==['f_found_o_key']
+    after['objects']['o_key']['visible']=False
+    restored,repeated,_=world.reduce(b,after,[step('check','o_desk','f_lock')],P)
+    assert restored['objects']['o_key']['visible'] and repeated['evidence_ids']==[]
 
 
 def test_dialogue_auditor_can_only_select_words_the_character_actually_said():

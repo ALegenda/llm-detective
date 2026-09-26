@@ -152,6 +152,28 @@ def add_evidence(s, eid, title, text, kind, source):
     s['evidence'].append({'id':eid,'title':title,'text':text,'kind':kind,'source':source,'location':s['location'],'minute':s['minute']})
 
 
+def record_discoveries(b, s, previously_visible):
+    """Preserve witnessed discovery locations before later pickup or movement."""
+    objects=index(b,'objects'); locations=index(b,'locations')
+    for obj in b['objects']:
+        oid=obj['id']
+        if oid in previously_visible or not visible(obj,s):
+            continue
+        eid='f_found_'+oid
+        if any(e['id']==eid for e in s['evidence']):
+            continue
+        parent=s['objects'][oid]['container']; chain=[]; seen={oid}
+        while parent in objects and parent not in seen:
+            seen.add(parent); chain.append(objects[parent]['name'])
+            parent=s['objects'][parent]['container']
+        place=locations[s['location']]['name']
+        text='Обнаружен предмет «'+obj['name']+'» в локации «'+place+'».'
+        if chain:
+            text+=' Внутри: '+' → '.join('«'+name+'»' for name in reversed(chain))+'.'
+        add_evidence(s,eid,'Место обнаружения: '+obj['name'],text,'observation',obj['name'])
+        s['evidence'][-1]['discovery']=True
+
+
 def trigger(b, s, kind, value, messages):
     for r in b['reactions']:
         if r['id'] in s['triggered'] or r['id'] in s['completed_reactions']:
@@ -255,10 +277,20 @@ def reduce(b, old, steps, payload, speeches=None):
     shown=accessible_evidence(s,payload.get('evidence',[]))
     for step_no, step in enumerate(steps[:4]):
         kind,target=step['kind'],step['target']
+        previously_visible={o['id'] for o in b['objects'] if visible(o,s)}
         obj=objects.get(target); npc=people.get(target)
         if kind in ['clarify','impossible']:
             messages.append(step['explanation'] or 'Уточните предмет и способ действия.'); break
-        if kind=='look':
+        if kind=='compare':
+            entries={e['id']:e for e in s['evidence']}
+            ids=list(dict.fromkeys(step.get('evidence_ids',[])))
+            if len(ids)<2 or any(eid not in entries for eid in ids):
+                messages.append('Для сопоставления нужны как минимум две уже полученные записи. Уточните, какие наблюдения сравнить.'); break
+            messages.append('Сопоставление собранных сведений. Новых осмотров не проводилось:')
+            for eid in ids:
+                entry=entries[eid]
+                messages.append(entry['source']+' — '+entry['title']+': '+entry['text'])
+        elif kind=='look':
             messages.append(locs[s['location']]['description'])
             names=[o['name'] for o in b['objects'] if visible(o,s) and o['id'] not in s['inventory']]
             messages.append('В поле зрения: '+', '.join(names)+'.' if names else 'Здесь нет доступных для осмотра предметов.')
@@ -402,6 +434,8 @@ def reduce(b, old, steps, payload, speeches=None):
             advance(b,s,minutes,messages); messages.append('Вы наблюдаете за обстановкой. Прошло минут: '+str(minutes)+'.')
         else:
             raise ValueError('Unknown action')
+        if kind in ['open','check']:
+            record_discoveries(b,s,previously_visible)
         mutations.append({'kind':kind,'target':target,'minute':s['minute']})
     observe_people(b,s)
     return s, {'messages':messages,'minutes':s['minute']-old['minute'],

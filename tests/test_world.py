@@ -85,6 +85,45 @@ def test_cannot_teleport_or_take_remote(game):
     assert s['inventory']==[]
 
 
+def test_discovery_preserves_original_container_after_pickup(game):
+    b,s=game
+    blocked,_,_=world.reduce(b,s,[step('open','o_desk')],P)
+    assert not any(e.get('discovery') for e in blocked['evidence'])
+    s,_,_=world.reduce(b,s,[step('take','o_key'),step('open','o_desk')],P)
+    found=[e for e in s['evidence'] if e.get('discovery')]
+    assert len(found)==1
+    assert found[0]['source']=='Письмо'
+    assert '«Стол»' in found[0]['text'] and '«Кабинет»' in found[0]['text']
+    assert 'перенести встречу' not in found[0]['text']
+    s,_,_=world.reduce(b,s,[step('take','o_letter'),step('travel',destination='l_garden'),step('put','o_letter')],P)
+    assert [e for e in s['evidence'] if e.get('discovery')]==found
+
+
+def test_opening_check_records_discovery_without_revealing_nested_contents(game):
+    b,s=game
+    b['checks'][0]['opens_object']=True
+    b['objects'].append(dict(b['objects'][2],id='o_hidden',name='Скрытое вложение',container='o_letter'))
+    s=world.initial(b)
+    s,_,_=world.reduce(b,s,[step('take','o_key'),step('check','o_desk','f_lock')],P)
+    assert [e['source'] for e in s['evidence'] if e.get('discovery')]==['Письмо']
+    s,_,_=world.reduce(b,s,[step('close','o_desk'),step('open','o_desk')],P)
+    assert len([e for e in s['evidence'] if e.get('discovery')])==1
+
+
+def test_compare_uses_only_existing_records_without_advancing_world(game):
+    b,s=game
+    world.add_evidence(s,'known_1','Первый осмотр','Три насечки.','observation','Диск')
+    world.add_evidence(s,'known_2','Архивный контур','Три насечки и скол.','observation','Калька')
+    s2,result,_=world.reduce(b,s,[step('compare')|{'evidence_ids':['known_1','known_2']}],P)
+    assert s2==s and result['minutes']==0 and result['evidence_ids']==[]
+    assert 'Три насечки.' in result['messages'][1]
+    assert 'Три насечки и скол.' in result['messages'][2]
+    for ids in [['known_1','f_letter'],['known_1','known_1']]:
+        unchanged,rejected,_=world.reduce(b,s,[step('compare')|{'evidence_ids':ids}],P)
+        assert unchanged==s and 'Уточните' in rejected['messages'][0]
+        assert 'Ирина просила' not in str(rejected)
+
+
 def test_cannot_present_unheld_item_or_unknown_fact(game):
     b,s=game
     with pytest.raises(ValueError):world.accessible_evidence(s,['o_key'])

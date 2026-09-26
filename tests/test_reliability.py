@@ -320,6 +320,9 @@ def test_finish_pipeline_persists_rubric_grounded_verdict(client,game):
         world.add_evidence(s,check['id'],check['intent'],check['result'],'observation','Контрольный источник')
     with db.transaction() as con:con.execute('UPDATE attempts SET state=? WHERE id=?',(db.encode(s),'a1'))
     evidence=[c['id'] for c in b['checks']]
+    world.add_evidence(s,'f_found_o_letter','Место обнаружения','Письмо найдено внутри стола.','observation','Письмо')
+    s['evidence'][-1]['discovery']=True
+    with db.transaction() as con:con.execute('UPDATE attempts SET state=? WHERE id=?',(db.encode(s),'a1'))
     response=client.post('/api/attempts/a1/commands',json={'kind':'finish','text':explanation,'evidence':evidence,'confirmed':True,'version':0},headers={'Idempotency-Key':'finish-rubric'})
     assert response.status_code==202
     job=db.claim()
@@ -328,6 +331,8 @@ def test_finish_pipeline_persists_rubric_grounded_verdict(client,game):
         def structured(self,category,prompt,context,schema):
             assert category=='evaluation'
             assert context['public_dialogue']==s['dialogue']
+            assert context['public_discoveries']==[s['evidence'][-1]]
+            assert 'f_found_o_letter' not in evidence
             assert 'NEVER proves that a speaker told the truth' in prompt
             raw={'claims':[{'quote':explanation,'status':'accurate','feedback':'Верно'}],
                  'criteria':[{'criterion_index':i,'satisfied':True,'credit':2,'quote':explanation,'evidence_ids':evidence,'feedback':'Подтверждено'} for i in range(len(context['rubric']))],

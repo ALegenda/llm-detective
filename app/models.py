@@ -141,13 +141,14 @@ class Review(Model):
 
 
 class Step(Model):
-    kind: Literal['look','check','take','put','open','close','travel','talk','follow','wait','arrange','clarify','impossible']
+    kind: Literal['look','check','compare','take','put','open','close','travel','talk','follow','wait','arrange','clarify','impossible']
     target: str
     check_id: str
     destination: str
     topic: str
     minutes: int = Field(ge=0, le=15)
     explanation: str
+    evidence_ids: list[str] = Field(default_factory=list, max_length=8, description='For compare only: IDs of at least two existing notebook entries to place side by side. Never hidden check IDs.')
 
 
 class Interpretation(Model):
