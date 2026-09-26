@@ -1,5 +1,8 @@
 # Production disk measurement — 2026-09-26
 
+This first section records the incident before recovery. Recovery completed later
+the same morning; see the verified outcome at the end of this report.
+
 Measured twice, at 09:22:02 and 09:22:06 GMT+8, on Render instance `hxbsh`.
 Source: [diagnostic deploy b3845d9](https://dashboard.render.com/web/srv-dafqtqlbedkc73flslg0/deploys/dep-darhs7bl550s738f4p90).
 The read-only diagnostic runs before SQLite initialization; no story content or credentials are logged.
@@ -35,3 +38,17 @@ Validation: 156 Python tests; 2 Node tests; JavaScript syntax check; successful 
 - [MinIO AIStor](https://www.min.io/pricing): single-node Free edition exists, but compute and disks must be hosted separately. The official page states original OSS MinIO is no longer maintained. Managed R2 avoids operating another storage server.
 
 No provider account was created, no credentials were added, and no paid storage upgrade was applied.
+
+## Recovery completed later that morning
+
+With the user's explicit authorization, R2 was activated and private bucket
+`llm-detective-assets` was connected using bucket-restricted credentials in Render.
+All 549 images (994,272,128 bytes) were copied, verified by full readback and SHA-256,
+and removed from Render. At 09:53:14 GMT+8 the database reopened without diagnostic
+errors; local image count was zero and available space was 995,381,248 bytes.
+After disabling the migration flag, a second successful startup at 09:58:06
+confirmed the same zero-image inventory. Previously blocked storage fixes are now
+live. The 1 GB persistent disk remains provisioned for SQLite and saves.
+
+See [R2 configuration and production verification](R2_STORAGE.md) for deployment
+identifiers, safeguards, and the remaining new-image generation check.
