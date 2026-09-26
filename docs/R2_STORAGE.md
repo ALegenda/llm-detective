@@ -94,3 +94,35 @@ to be verified once that authorized testing budget is lifted.
 
 The provisioned Render disk remains 1 GB for SQLite and saves. No disk expansion
 or deletion was performed, and freeing image capacity does not cancel its charge.
+
+### Compact image profile verified in production
+
+Render still had `OPENAI_IMAGE_MODEL=gpt-image-1.5`, overriding the newer code
+default. It was changed to `gpt-image-2.5-flare`. The effective startup config
+confirmed low quality, WebP compression 80, square 832×832 and landscape 1152×768.
+Live generation produced a 60,588-byte base portrait (143 input / 173 output
+tokens) and a 61,140-byte expression edit (1,203 input / 173 output tokens).
+Both were accepted and displayed in the normal player interface.
+
+The workshop and foyer initially exhausted retries because review confused
+ordinary room props and venue signage with blocking defects. Location review
+now receives public room context and specific interaction-target exteriors,
+separately from optional generation directions. It still rejects recognizable
+clues, spoilers and invented evidence. After commit `3b333c0` went Live in deploy
+`dep-daritnbl550s738fsu50`, both retried jobs completed on their first new
+candidate: workshop 139,506 bytes (145 input / 127 output tokens), foyer 110,492
+bytes (164 input / 127 output tokens). The workshop was visually checked in game.
+
+The measured output-token counts are 36.4% below the previous GPT Image 1.5 low
+1024×1024 count of 272, and 68.25% below its low 1536×1024 count of 400.
+These are per-generation comparisons against documented prior-model counts,
+not matched-prompt experiments or total-cost savings; input, QA and retries
+also cost tokens. Existing PNGs were not recompressed or regenerated.
+
+Validation: 179 Python tests and GitHub CI `36212044688` passed. New R2 renders
+left no local image files at subsequent startup. Temporary unlimited testing
+was closed by restoring attempt/case budgets to 200/140 and the user-approved
+daily budget to 800 (environment deployment `dep-dariuo8jo6nc7385ommg`).
+
+Model and output controls: [GPT Image 2.5 Flare](https://developers.openai.com/api/docs/models/gpt-image-2.5-flare),
+[image generation guide](https://developers.openai.com/api/docs/guides/image-generation).
