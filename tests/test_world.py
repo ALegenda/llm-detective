@@ -333,3 +333,26 @@ def test_unreachable_clue_reports_causal_blockers(blueprint):
     assert 'f_lock [missing facts: f_compare]' in str(error.value)
     assert 'f_compare [missing facts: f_view]' in str(error.value)
     assert 'f_view [missing facts: f_lock]' in str(error.value)
+
+
+def test_speaker_cannot_bypass_disclosure_gates_through_private_author_memory(game):
+    b,s=game
+    person=world.index(b,'people')['n_ira']
+    person['knowledge']=['AUTHOR_ONLY: I deliberately hid the letter for money.']
+    for account in person['accounts']:
+        account['private_context']='SECRET_REASON: This public denial conceals the theft.'
+    secret=next(a for a in person['accounts'] if a['id']=='s_secret')
+    secret['claim']='DISCLOSED_ONLY_AFTER_EVIDENCE: I moved the letter.'
+    world.add_evidence(s,'f_letter','Письмо','Дата встречи','observation','Письмо')
+    # Possession without showing it must not unlock a response.
+    before=world.speech_context(b,s,'n_ira',P)
+    text=json.dumps(before)
+    assert 'AUTHOR_ONLY' not in text and 'SECRET_REASON' not in text
+    assert 'DISCLOSED_ONLY_AFTER_EVIDENCE' not in text
+    assert 'knowledge' not in before['person']
+    after=world.speech_context(b,s,'n_ira',P|{'evidence':['f_letter']})
+    text=json.dumps(after)
+    assert 'DISCLOSED_ONLY_AFTER_EVIDENCE' in text
+    assert 'AUTHOR_ONLY' not in text and 'SECRET_REASON' not in text
+    assert all(set(a)=={'id','topic','claim','emotion'} for a in after['accounts'])
+    assert person['knowledge'][0].startswith('AUTHOR_ONLY')  # Author truth is unchanged.

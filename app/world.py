@@ -259,8 +259,11 @@ def accounts_for(b,s,nid,evidence):
 
 def speech_context(b,s,nid,payload):
     n=index(b,'people')[nid]
-    return {'person':{k:n[k] for k in ['id','name','role','appearance','personality','interests','knowledge']},
-        'accounts':accounts_for(b,s,nid,payload['evidence']),
+    # The actor receives speakable claims, not the author's secret causal
+    # memories or explanations of lies. Otherwise knowledge/private_context
+    # bypasses every requires_evidence gate without an account id.
+    return {'person':{k:n[k] for k in ['id','name','role','appearance','personality','interests']},
+        'accounts':[{k:a[k] for k in ['id','topic','claim','emotion']} for a in accounts_for(b,s,nid,payload['evidence'])],
         'scene':{'location':index(b,'locations')[s['location']]['name'],
                  'visible_objects':[{'name':o['name'],'held_by_player':o['id'] in s['inventory'],'open':s['objects'][o['id']]['open']} for o in b['objects'] if visible(o,s)]},
         'state':s['people'][nid] | {'memory':s['people'][nid]['memory'][-24:]}, 'request':payload['text'],

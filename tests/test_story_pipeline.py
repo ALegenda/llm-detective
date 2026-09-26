@@ -5,7 +5,7 @@ import pytest
 from pydantic import ValidationError
 from app import db, worker, world
 from app.ai import InvalidContent, ProviderFailure
-from app.story_pipeline import (validate_outline,world_schema,script_schema,compile_world,exercise_world,build)
+from app.story_pipeline import (validate_outline,world_schema,script_schema,compile_world,exercise_world,build,VERSION)
 from test_reliability import queue_job
 
 
@@ -204,11 +204,11 @@ def test_worker_publishes_only_certified_new_pipeline_and_keeps_proof_private(cl
     worker.generate(j,ai)
     row=db.one("SELECT * FROM cases WHERE id='c1'")
     assert row['status']=='ready'
-    assert json.loads(row['blueprint'])['_meta']['generation_version']==9
+    assert json.loads(row['blueprint'])['_meta']['generation_version']==VERSION
     assert json.loads(row['review'])['mechanical_proof']['clues_acquired']==7
     public=client.get('/api/cases/c1').json()
     assert 'certificate' not in public and 'outline' not in public and 'truth' not in public
-    assert public['generation_version']==9 and public['stage']=='ready'
+    assert public['generation_version']==VERSION and public['stage']=='ready'
 
 
 def test_wrong_independent_solution_cannot_publish_even_if_auditor_misses_it(game,outline):
