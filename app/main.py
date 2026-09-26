@@ -103,8 +103,10 @@ def admin(user=Depends(authenticate)):
 
 @asynccontextmanager
 async def lifespan(app):
-    config.preflight();db.init()
     from . import storage
+    config.preflight()
+    print('STORAGE_DIAGNOSTIC '+json.dumps(storage.disk_report(),sort_keys=True),flush=True)
+    db.init()
     storage.prune_discarded_images()
     stop=threading.Event()
     count=max(3,min(4,int(os.getenv('WORKERS','3'))))

@@ -12,6 +12,27 @@ class ImageAI:
     def structured(self,*args,**kwargs):return {'accepted':True,'reason':'Valid'}
 
 
+def test_disk_report_measures_files_without_reading_story_or_deleting(game):
+    job=queue_job('asset',{'kind':'person','entity':'n_ira','variant':'base'})
+    worker.asset_job(job,ImageAI())
+    orphan=config.DATA/'assets'/('e'*32+'.png');orphan.write_bytes(b'orphan')
+    report=storage.disk_report()
+    assert report['files']['assets']['count']==2
+    assert report['image_references']['unreferenced']['bytes']==6
+    assert report['image_references']['published']['bytes']==len(b'controlled image bytes')
+    assert report['database_pages']['page_size']>0
+    assert orphan.read_bytes()==b'orphan'
+    assert 'blueprint' not in str(report)
+
+
+def test_disk_report_retains_file_sizes_when_database_cannot_open(game,monkeypatch):
+    monkeypatch.setattr(config,'DB_PATH',config.DATA/'missing.sqlite3')
+    report=storage.disk_report()
+    assert report['filesystem']['total']>0
+    assert report['files']['detective.sqlite3']['bytes']>0
+    assert report['errors']
+
+
 def test_cleanup_preserves_published_images_and_resumable_candidates(game):
     job=queue_job('asset',{'kind':'person','entity':'n_ira','variant':'base'})
     worker.asset_job(job,ImageAI())
