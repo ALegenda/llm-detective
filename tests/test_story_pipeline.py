@@ -45,7 +45,6 @@ def make_script():
     s={'introduction':'Письмо исчезло из конторы. Выясните обстоятельства.','objective':'Найти письмо и объяснить исчезновение.','known_facts':['Письмо исчезло.','В конторе три свидетеля.'],'hints':['Осмотрите контору.','Сравните время.','Сопоставьте документы.']}
     for i in range(3):
         s[f'n_{i+1}']={'public_context':'Работает в порту.','status':'witness','accounts':[{'topic':str(j),'claim':'Я видела письмо.','private_context':'Вспоминает письмо','requires_evidence':['f_1'] if j==2 else [],'emotion':'calm'} for j in range(3)]}
-    s.update({f'f_{i+1}':{'result':'На документе '+str(i)+' указана встреча в 18:00.'} for i in range(7)})
     return s
 
 
@@ -87,12 +86,7 @@ def test_experiment_cannot_preselect_when_player_performs_it(outline):
         validate_outline(outline,SETTINGS)
     outline['clues'][3]['observation']='На приборе цинк 30%.'
     validated=validate_outline(outline,SETTINGS)
-    script=make_script()
-    script['f_4']['result']='На приборе цинк 30%, отметка 09:34.'
-    with pytest.raises(ValueError,match='fixed clock time'):
-        compile_world(validated,make_plan(),script)
-    script['f_4']['result']='На приборе цинк 30%.'
-    compiled=compile_world(validated,make_plan(),script)
+    compiled=compile_world(validated,make_plan(),make_script())
     assert compiled['checks'][3]['result']=='На приборе цинк 30%.'
     assert '18:00' in compiled['checks'][0]['result']  # Historical document remains intact.
 
@@ -162,7 +156,7 @@ class FakeAuthor:
             self.fail_once=None
             raise ProviderFailure('provider_connection_unknown',True)
         result={'story_outline':self.outline,'story_world':make_plan(),'story_script':make_script(),
-                'story_contract_audit':{key:{'passed':True,'stage':'script','reason':'Grounded'} for key in ['continuity','discoveries','grading']+[f'f_{i+1}' for i in range(7)]+[f'n_{i+1}' for i in range(3)]},
+                'story_contract_audit':{key:{'passed':True,'stage':'script' if key.startswith('n_') else 'outline','reason':'Grounded'} for key in ['continuity','discoveries','grading']+[f'f_{i+1}' for i in range(7)]+[f'n_{i+1}' for i in range(3)]},
                 'story_reader':{'culprits':['n_1'],'method':'Переложено','motive':'Скрыть время','reasoning':'Документы сходятся','supporting_evidence':['f_1','f_2'],'unresolved_ambiguities':[],'identity_resolved':True,'method_resolved':True,'motive_resolved':True},
                 'story_fact_audit':{'issues':[],'strengths':[]},
                 'story_audit':{'issues':self.audit_issues,'strengths':['Материальные маршруты']},'story_adjudication':{'blocking_issue_indices':list(range(len(self.audit_issues))),'reasoning':'Verified'}}[category]
@@ -338,20 +332,20 @@ def test_outline_rejects_one_container_in_two_physical_places(outline):
     with pytest.raises(ValueError,match='conflicting locations'):validate_outline(outline,SETTINGS)
 
 
-def test_fact_audit_is_scoped_to_observation_inputs_and_repaired_with_script(game,outline):
+def test_fact_audit_is_scoped_to_observation_inputs_and_repairs_canonical_author(game,outline):
     j=queue_job('generate');ai=FakeAuthor(outline);original=ai.structured
     def audit(category,prompt,context,schema):
         if category=='story_fact_audit':
             assert 'knowledge' not in json.dumps(context)
             assert context['observations'][0]['prior_observations']==[]
             assert len(context['observations'][3]['prior_observations'])==2
-            return {'issues':[{'stage':'script','target':'f_1','contradiction':'Local inspection compares an unavailable source','correction':'Keep only local marks'}],'strengths':[]}
+            return {'issues':[{'stage':'outline','target':'f_1','contradiction':'Local inspection compares an unavailable source','correction':'Keep only local marks'}],'strengths':[]}
         if category=='story_adjudication':return {'blocking_issue_indices':[0],'reasoning':'Two exact conflicting facts verified'}
         return original(category,prompt,context,schema)
     ai.structured=audit
-    with pytest.raises(InvalidContent,match='script'):build(j,ai,SETTINGS)
+    with pytest.raises(InvalidContent,match='outline'):build(j,ai,SETTINGS)
     cp=json.loads(db.one('SELECT checkpoint FROM jobs WHERE id=?',(j['id'],))['checkpoint'])
-    assert 'outline' in cp and 'world' in cp and 'certificate' in cp
+    assert 'outline' not in cp and 'world' not in cp and 'certificate' not in cp
     assert 'script' not in cp and 'fact_audit' not in cp
 
 
@@ -361,7 +355,7 @@ def test_public_cast_fields_cannot_disclose_guilt_before_play(outline,field):
     with pytest.raises(ValueError,match='guilt label'):validate_outline(outline,SETTINGS)
 
 
-@pytest.mark.parametrize('target,stage', [('f_2','script'),('n_2','outline'),('continuity','outline'),('discoveries','outline'),('grading','outline')])
+@pytest.mark.parametrize('target,stage', [('f_2','outline'),('f_4','world'),('n_2','script'),('continuity','outline'),('discoveries','outline'),('grading','outline')])
 def test_contract_failure_blocks_publication_before_general_audit(game,outline,target,stage):
     j=queue_job('generate');ai=FakeAuthor(outline);original=ai.structured
     def review(category,prompt,context,schema):
@@ -386,7 +380,7 @@ def test_contract_audit_must_cover_every_source_and_character(outline):
     from app.story_pipeline import contract_schema
     b=compile_world(outline,make_plan(),make_script())
     schema=contract_schema(b)
-    values={key:{'passed':True,'stage':'script','reason':'Grounded'} for key in schema.model_fields}
+    values={key:{'passed':True,'stage':'script' if key.startswith('n_') else 'outline','reason':'Grounded'} for key in schema.model_fields}
     del values['n_3']
     with pytest.raises(ValidationError):schema.model_validate(values)
 
@@ -397,3 +391,46 @@ def test_discovery_plan_cannot_claim_unsupported_or_duplicate_progress(outline,p
     elif problem=='duplicate':outline['discoveries'][1]['clue_indices']=[0,1]
     else:outline['discoveries'][0]['revised_interpretation']=outline['discoveries'][0]['initial_interpretation']
     with pytest.raises(ValueError,match='discover'):validate_outline(outline,SETTINGS)
+
+
+def test_audits_receive_resolved_discovery_support_and_actual_engine_finds(game,outline):
+    j=queue_job('generate');ai=FakeAuthor(outline)
+    b,_=build(j,ai,SETTINGS)
+    contracts=ai.contexts['story_contract_audit']
+    plans=contracts['discoveries']
+    assert 'clue_indices' not in plans[0]
+    assert [c['id'] for c in plans[0]['supporting_observations']]==['f_1','f_2']
+    assert [c['id'] for c in plans[1]['supporting_observations']]==['f_3','f_4']
+    assert plans[1]['supporting_observations'][1]['observation']==b['checks'][3]['result']
+    finds=contracts['certified_discoveries']
+    hidden=next(e for e in finds if e['id']=='f_found_o_7')
+    assert 'Коробка' in hidden['text'] and 'Чехол' in hidden['text']
+    assert 'Источник 6' in hidden['text'] and hidden['discovery'] is True
+    reader=ai.contexts['story_reader']
+    assert reader['public_discoveries']==finds
+    assert not any(key in json.dumps(reader) for key in ['private_context','knowledge','culprit_indices'])
+    from app.story_pipeline import reader_schema
+    solution=dict(culprits=['n_1'],method='Перенос',motive='Время',reasoning='Найдено в чехле',supporting_evidence=[hidden['id'],'f_1'],unresolved_ambiguities=[],identity_resolved=True,method_resolved=True,motive_resolved=True)
+    assert reader_schema(b,finds).model_validate(solution).supporting_evidence[0]==hidden['id']
+    solution['supporting_evidence'][0]='f_found_invented'
+    with pytest.raises(ValidationError):reader_schema(b,finds).model_validate(solution)
+
+
+def test_script_cannot_rewrite_canonical_material_observations(outline):
+    original=compile_world(outline,make_plan())
+    scripted=compile_world(outline,make_plan(),make_script())
+    assert original['checks']==scripted['checks']
+    # Enforce the boundary in the schema and the compiler, not just a prompt.
+    script=make_script();script['f_1']={'result':'A different date and another author.'}
+    with pytest.raises(ValidationError):script_schema(outline).model_validate(script)
+    with pytest.raises(ValidationError):compile_world(outline,make_plan(),script)
+
+
+def test_observation_contract_cannot_send_fact_repair_to_dialogue_author(outline):
+    from app.story_pipeline import contract_schema
+    b=compile_world(outline,make_plan(),make_script());schema=contract_schema(b)
+    values={key:{'passed':True,'stage':'script' if key.startswith('n_') else 'outline','reason':'Grounded'} for key in schema.model_fields}
+    schema.model_validate(values)
+    values['f_1']={'passed':False,'stage':'script','reason':'Wrong date in canonical observation'}
+    with pytest.raises(ValidationError) as error:schema.model_validate(values)
+    assert error.value.errors()[0]['loc']==('f_1','stage')
