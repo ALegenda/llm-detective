@@ -354,6 +354,23 @@ def asset_job(job,ai):
             'Judge this image independently. Historical feedback is not proof of a defect. '
             'For a forbidden interaction target, name the target and its identifying visible features; '
             'generic furniture or equipment is not that target merely because it shares a material or broad shape.'}
+        if kind=='location':
+            # Generation directions are preferences, not rejection criteria.
+            # In particular, a repair request for an empty desk must not make
+            # otherwise harmless workshop tools into a new blocking defect.
+            review_context={'kind':'location','public_room':{
+                'name':item['name'],'description':item['description'],'atmosphere':item['atmosphere']},
+                'style':b['visual_style'],
+                'interaction_targets':[{'name':o['name'],'exterior':o['surface']}
+                    for o in b['objects'] if o['location']==entity],
+                'review_rule':'Assess this environment independently for gameplay-breaking defects only. '
+                'Ordinary tools, optical equipment, loose parts, incidental papers, open books and generic venue signage '
+                'are allowed. Public setting labels and event titles are not evidence or spoilers. '
+                'Do not infer readable clue contents from the mere presence of paper or a book. '
+                'Reject a recognizable interaction target or readable invented evidence only when you can '
+                'identify its specific distinguishing features or quote the clue and explain what case fact it asserts. '
+                'Shared material or broad shape alone does not identify an interaction target. '
+                'Empty surfaces and absence of all lettering are optional art direction, never acceptance requirements.'}
         review=ai.structured('visual_review',
             'Review generated illustration for blocking defects, not optional art direction refinements. Reject spoilers, genuinely legible invented case-specific clue text (quote the readable text), severely cropped face or main object, corrupt image, major rendering mismatch, wrong main object or clearly changed person identity. Ordinary ruler/caliper graduation ticks, generic markings, illegible pseudo-writing and blank document grids are NOT invented clues. For 2 input images the first is the identity reference, the second is the candidate: they are separate inputs, not a two-panel candidate. Require the same recognizable person and principal clothes, not pixel-exact accessory placement. Subtle emotion is acceptable; insufficient dramatic sadness/anxiety alone is NEVER blocking. A neutral background is intentional. Missing small accessories, fingers, a colored edge, slight crop/pose changes with the full head visible are not blocking. Locations may contain ordinary furniture and incidental papers; reject a specific recognizable clue/spoiler, not an entire generic object category. Final visual constraints override contradictory earlier reference details. Explain only concrete blocking defects.',
             review_context,VisualReview,images=images)
