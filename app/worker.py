@@ -29,13 +29,6 @@ def asset_task(con,cid,kind,entity,variant='base',priority=50):
 
 def generate(job, ai):
     checkpoint=json.loads(job['checkpoint']) if job['checkpoint'] else {}
-    if kind=='location' and checkpoint.get('feedback') and not checkpoint.get('file'):
-        # Rich scene references can repeatedly draw a rejected focal prop.
-        # Rebuild from the public room description, keeping surfaces clear.
-        instructions=('Shared palette and rendering style: '+b['visual_style']+
-            '\nOne wide environment illustration. Show architecture, fixed furniture and ambient light only. '
-            'Keep work surfaces clear. No people, portable props, text, diagrams, insets or close-ups. '
-            'Room: '+item['name']+'. '+item['description']+' Atmosphere: '+item['atmosphere'])
     # Existing in-progress v1 cases retain their recovery path; new work uses v2.
     if checkpoint and not checkpoint.get('pipeline_version'):
         return generate_legacy(job,ai)
@@ -318,6 +311,13 @@ def asset_job(job,ai):
     else:
         instructions+='Editorial object illustration, entire object within generous margins, simple neutral background. Object: '+item['name']+'. Appearance reference: '+item['image_prompt']+' Exterior: '+item['surface']+'\nFINAL VISUAL CONSTRAINT: depict the exterior only. Any reference to document contents, dates, signatures, measurements or clue details is context, not text to paint. Books show unmarked covers or nonspecific blank pages, preserving their publicly described open/closed state; loose paper uses blank/nonsemantic lines. No readable case-specific text, no contents revealed, no magnified clues. Ordinary instrument graduation ticks are allowed and do not represent a performed measurement.'
     checkpoint=json.loads(job['checkpoint']) if job['checkpoint'] else {}
+    if kind=='location' and checkpoint.get('feedback') and not checkpoint.get('file'):
+        # Rich scene references can repeatedly draw a rejected focal prop.
+        # Rebuild from the public room description, keeping surfaces clear.
+        instructions=('Shared palette and rendering style: '+b['visual_style']+
+            '\nOne wide environment illustration. Show architecture, fixed furniture and ambient light only. '
+            'Keep work surfaces clear. No people, portable props, text, diagrams, insets or close-ups. '
+            'Room: '+item['name']+'. '+item['description']+' Atmosphere: '+item['atmosphere'])
     if kind=='object' and checkpoint.get('feedback') and not checkpoint.get('file'):
         # A rich source description can keep pulling document contents back
         # into every redraw. Repair from a minimal public silhouette instead
