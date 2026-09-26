@@ -79,6 +79,22 @@ def test_reading_only_case_fails_activity_requirement(outline):
     with pytest.raises(ValueError,match='player comparisons'):validate_outline(outline,SETTINGS)
 
 
+def test_experiment_cannot_preselect_when_player_performs_it(outline):
+    outline['clues'][3].update(method='experiment',observation='На приборе цинк 30%, отметка 18.06, 09:34.')
+    with pytest.raises(ValueError,match='fixed clock time'):
+        validate_outline(outline,SETTINGS)
+    outline['clues'][3]['observation']='На приборе цинк 30%.'
+    validated=validate_outline(outline,SETTINGS)
+    script=make_script()
+    script['f_4']['result']='На приборе цинк 30%, отметка 09:34.'
+    with pytest.raises(ValueError,match='fixed clock time'):
+        compile_world(validated,make_plan(),script)
+    script['f_4']['result']='На приборе цинк 30%.'
+    compiled=compile_world(validated,make_plan(),script)
+    assert compiled['checks'][3]['result']=='На приборе цинк 30%.'
+    assert '18:00' in compiled['checks'][0]['result']  # Historical document remains intact.
+
+
 def test_opening_badges_do_not_single_out_the_hidden_culprit(outline):
     script=make_script();script['n_1']['status']='person_of_interest'
     b=compile_world(validate_outline(outline,SETTINGS),make_plan(),script)
@@ -185,11 +201,11 @@ def test_worker_publishes_only_certified_new_pipeline_and_keeps_proof_private(cl
     worker.generate(j,ai)
     row=db.one("SELECT * FROM cases WHERE id='c1'")
     assert row['status']=='ready'
-    assert json.loads(row['blueprint'])['_meta']['generation_version']==7
+    assert json.loads(row['blueprint'])['_meta']['generation_version']==8
     assert json.loads(row['review'])['mechanical_proof']['clues_acquired']==7
     public=client.get('/api/cases/c1').json()
     assert 'certificate' not in public and 'outline' not in public and 'truth' not in public
-    assert public['generation_version']==7 and public['stage']=='ready'
+    assert public['generation_version']==8 and public['stage']=='ready'
 
 
 def test_wrong_independent_solution_cannot_publish_even_if_auditor_misses_it(game,outline):
@@ -272,6 +288,7 @@ def test_two_experiments_share_the_same_physical_tool(outline):
     plan=make_plan()
     for i in [4,5]:
         outline['clues'][i]['method']='experiment'
+        outline['clues'][i]['observation']='Под лупой видны параллельные царапины.'
         plan[f'f_{i+1}']=recipe(tool_name='Лупа',tool_surface='Лупа',tool_image_prompt='Lens',tool_location='l_2')
     b=compile_world(outline,plan)
     tools=[o for o in b['objects'] if o['name']=='Лупа']

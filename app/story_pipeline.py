@@ -13,7 +13,7 @@ from .ai import InvalidContent
 from .models import Model, Location, Thing, Check, Account, Blueprint
 from .generation import validate_blueprint
 
-VERSION = 7
+VERSION = 8
 
 class Place(Model):
     name: str
@@ -161,6 +161,16 @@ OUTLINE_PROMPT += '''\nThe ending must RESOLVE the dramatic question. event/meth
 AUDIT_PROMPT += '''\nAn unresolved core ending is blocking, not a stylistic preference. Check that the author knows what actually happened and why, and that material evidence supports that explanation over the strongest innocent alternative. Do not approve a truth that itself says the main act or motive remains only possible. Strengthen evidence instead of redefining success as naming a possible suspect. Distinguish harmless uncertainty about peripheral movements from uncertainty about the central action or intention.'''
 
 
+OUTLINE_PROMPT += '\nA player-performed experiment has no predetermined wall-clock timestamp: the player chooses when to run it. Describe measured values only; the engine records the actual action time. Historical dated measurements belong in separate readable documents, never as the timestamp of the player’s new experiment.'
+SCRIPT_PROMPT += '\nNever stamp a player-performed experiment with a fixed clock time. The engine supplies its actual time. Preserve historical timestamps only in their original documentary sources.'
+
+
+def validate_experiment_time(method, text, target):
+    import re
+    if method=='experiment' and re.search(r'(?<!\d)(?:[01]?\d|2[0-3]):[0-5]\d(?!\d)',text):
+        raise ValueError(target+' experiment result has a fixed clock time; the player chooses when to perform it. Keep measured values only; put historical measurements in a separate readable source.')
+
+
 def validate_outline(raw, settings):
     import re
     o=MysteryOutline.model_validate(raw).model_dump()
@@ -182,6 +192,7 @@ def validate_outline(raw, settings):
             if item['location_index']>=len(o['places']):errors.append(f'{group}[{i}].location_index outside places')
     placements={}
     for i,c in enumerate(o['clues']):
+        validate_experiment_time(c['method'],c['observation'],f'clues[{i}]')
         if c['method']=='compare' and i<2:errors.append(f'clues[{i}] comparison must follow at least two source observations')
         path=c['container_path']
         if any(not name.strip() for name in path) or len(set(path))!=len(path):errors.append(f'clues[{i}] container_path must contain distinct nonempty names')
@@ -320,6 +331,7 @@ def compile_world(o, raw_plan, script=None, language='ru'):
             tools=[tool]
         oid=thing(oid,c['source_name'],c['source_surface'],c['source_image_prompt'],room,fixture_alias=c['source_kind']=='fixture',portable=c['portable'],movable=c['portable'],container=parent,visible=not parent)
         result=script[fid]['result'] if script else c['observation']
+        validate_experiment_time(c['method'],result,fid)
         checks.append(Check(id=fid,object_id=oid,intent=verbs[c['method']]+': '+c['focus'],result=result,requires_facts=r['requires'],requires_tools=tools,requires_open=parent,reveals_objects=[],minutes=r['minutes'],essential=True,opens_object=False).model_dump())
     locations=[]
     for i,p in enumerate(o['places']):
