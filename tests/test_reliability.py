@@ -314,6 +314,8 @@ def test_optional_uncited_remark_does_not_override_fully_proven_solution():
 def test_finish_pipeline_persists_rubric_grounded_verdict(client,game):
     b,s=game
     explanation='Ирина перенесла письмо без взлома, чтобы скрыть перенос встречи.'
+    s['dialogue']=[{'person':'n_ira','name':'Ирина','player':'Почему вы промолчали?',
+        'reply':'Я не буду объяснять своё молчание.','shown':[],'minute':0}]
     for check in b['checks']:
         world.add_evidence(s,check['id'],check['intent'],check['result'],'observation','Контрольный источник')
     with db.transaction() as con:con.execute('UPDATE attempts SET state=? WHERE id=?',(db.encode(s),'a1'))
@@ -325,6 +327,8 @@ def test_finish_pipeline_persists_rubric_grounded_verdict(client,game):
         case=db.one('SELECT * FROM cases WHERE id=?',('c1',))
         def structured(self,category,prompt,context,schema):
             assert category=='evaluation'
+            assert context['public_dialogue']==s['dialogue']
+            assert 'NEVER proves that a speaker told the truth' in prompt
             raw={'claims':[{'quote':explanation,'status':'accurate','feedback':'Верно'}],
                  'criteria':[{'criterion_index':i,'satisfied':True,'credit':2,'quote':explanation,'evidence_ids':evidence,'feedback':'Подтверждено'} for i in range(len(context['rubric']))],
                  'evidence_assessment':['Сопоставлены независимые источники.']}

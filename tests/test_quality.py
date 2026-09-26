@@ -14,6 +14,15 @@ def report(credits):
             'evidence_assessment':[]}
 
 
+def test_report_initials_remain_in_exact_complete_quotes():
+    text='Карточка подписана П. Л. и датирована 14:10. Лебедев подтвердил распоряжение.\nЯ не получил признания.'
+    assert worker.report_quotes(text)==[
+        'Карточка подписана П. Л. и датирована 14:10.',
+        'Лебедев подтвердил распоряжение.', 'Я не получил признания.']
+    assert worker.report_quotes('Запись П.  Л. подтверждает автора. Что дальше?')==[
+        'Запись П.  Л. подтверждает автора.', 'Что дальше?']
+
+
 @pytest.mark.parametrize('credits,score,proved', [([0,0,0,0],0,False),([2,1,0,1],5,False),([2,2,2,1],8.8,False),([2,2,2,2],10,True)])
 def test_report_partial_credit_is_explained_and_deterministic(credits,score,proved):
     result=worker.grounded_evaluation(report(credits),'Моя версия.',['f1'],[{'description':f'Критерий {i}'} for i in range(4)])

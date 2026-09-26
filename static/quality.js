@@ -8,6 +8,11 @@ const qualityAxes = [
  ['pacing','Темп и развязка',['Сбой или разочаровывающий финал','Были повторы или лишние действия','Хороший темп, удобные записи, понятный финал']]
 ];
 
+export function readableEvidence(text,entries=[]){
+ const names=new Map(entries.map(x=>[x.id,`${x.source}: ${x.title}`]));
+ return String(text??'').replace(/\b[fs]_[A-Za-z0-9_]+\b/g,id=>names.has(id)?`«${names.get(id)}»`:id);
+}
+
 export function reportScore(ev){
  if(ev.score==null)return '<p class="small muted">Этот разбор создан до введения баллов. Числовая оценка для него не рассчитывалась.</p>';
  return `<section class="report-score"><h2>Из чего сложилась оценка</h2><p>Каждый критерий имеет одинаковый вес: полный зачёт — 2, частичный — 1, нет зачёта — 0. Сумма переводится в 10-балльную шкалу.</p><p class="small muted">Ошибочные утверждения: −${e(ev.mistake_deduction)} балла (по 0,5, максимум 2). Неподтверждённые дополнительные замечания отмечаются отдельно.</p><ol class="score-criteria">${(ev.criteria||[]).map(c=>`<li><strong>${e(c.description)} · ${c.credit}/2</strong><p>${e(c.feedback)}</p>${c.quote?`<blockquote>${e(c.quote)}</blockquote>`:''}</li>`).join('')}</ol></section>`;

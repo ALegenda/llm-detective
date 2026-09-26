@@ -144,7 +144,7 @@ class FakeAuthor:
             self.fail_once=None
             raise ProviderFailure('provider_connection_unknown',True)
         result={'story_outline':self.outline,'story_world':make_plan(),'story_script':make_script(),
-                'story_reader':{'culprits':['n_1'],'method':'Переложено','motive':'Скрыть время','reasoning':'Документы сходятся','supporting_evidence':['f_1','f_2'],'unresolved_ambiguities':[]},
+                'story_reader':{'culprits':['n_1'],'method':'Переложено','motive':'Скрыть время','reasoning':'Документы сходятся','supporting_evidence':['f_1','f_2'],'unresolved_ambiguities':[],'identity_resolved':True,'method_resolved':True,'motive_resolved':True},
                 'story_fact_audit':{'issues':[],'strengths':[]},
                 'story_audit':{'issues':self.audit_issues,'strengths':['Материальные маршруты']},'story_adjudication':{'blocking_issue_indices':list(range(len(self.audit_issues))),'reasoning':'Verified'}}[category]
         return schema.model_validate(result).model_dump()
@@ -185,11 +185,11 @@ def test_worker_publishes_only_certified_new_pipeline_and_keeps_proof_private(cl
     worker.generate(j,ai)
     row=db.one("SELECT * FROM cases WHERE id='c1'")
     assert row['status']=='ready'
-    assert json.loads(row['blueprint'])['_meta']['generation_version']==6
+    assert json.loads(row['blueprint'])['_meta']['generation_version']==7
     assert json.loads(row['review'])['mechanical_proof']['clues_acquired']==7
     public=client.get('/api/cases/c1').json()
     assert 'certificate' not in public and 'outline' not in public and 'truth' not in public
-    assert public['generation_version']==6 and public['stage']=='ready'
+    assert public['generation_version']==7 and public['stage']=='ready'
 
 
 def test_wrong_independent_solution_cannot_publish_even_if_auditor_misses_it(game,outline):
@@ -202,6 +202,22 @@ def test_wrong_independent_solution_cannot_publish_even_if_auditor_misses_it(gam
     with pytest.raises(InvalidContent,match='Independent reader'):build(j,ai,SETTINGS)
     cp=json.loads(db.one('SELECT checkpoint FROM jobs WHERE id=?',(j['id'],))['checkpoint'])
     assert cp['stage']=='outline' and 'blueprint' not in cp
+
+
+@pytest.mark.parametrize('aspect',['identity','method','motive'])
+def test_unresolved_core_cannot_publish_despite_matching_suspect_and_clean_audit(game,outline,aspect):
+    j=queue_job('generate');ai=FakeAuthor(outline);original=ai.structured
+    def unresolved(category,prompt,context,schema):
+        result=original(category,prompt,context,schema)
+        if category=='story_reader':
+            result[aspect+'_resolved']=False
+            result['unresolved_ambiguities']=['Ordinary maintenance and theft fit equally well.']
+        return result
+    ai.structured=unresolved
+    with pytest.raises(InvalidContent,match='core resolution: '+aspect):build(j,ai,SETTINGS)
+    cp=json.loads(db.one('SELECT checkpoint FROM jobs WHERE id=?',(j['id'],))['checkpoint'])
+    assert cp['stage']=='outline' and 'blueprint' not in cp
+    assert 'do not lower the solution' in cp['feedback']['outline'][0]
 
 
 @pytest.mark.parametrize('revision,stage_rejections,retry',[(1,1,True),(2,2,True),(3,3,False),(4,1,True),(5,1,False)])
