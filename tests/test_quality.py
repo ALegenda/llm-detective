@@ -113,6 +113,27 @@ def test_rejected_document_redraw_drops_conflicting_content_reference(game):
     worker.asset_job(db.one('SELECT * FROM jobs WHERE id=?',(job['id'],)),ai)
     assert len(ai.prompts)==2 and 'readable 18:00' in ai.prompts[0] and 'readable 18:00' not in ai.prompts[1]
     assert 'BACK side' in ai.prompts[1]
+
+
+def test_rejected_location_redraw_drops_repeated_focal_prop(game):
+    job=queue_job('asset',{'kind':'location','entity':'l_hall','variant':'base'})
+    class ControlledAI:
+        case=db.one("SELECT * FROM cases WHERE id='c1'")
+        prompts=[]
+        def image(self,prompt,*args,**kwargs):
+            self.prompts.append(prompt)
+            return b'controlled image'
+        def structured(self,*args,**kwargs):
+            return {'accepted':len(self.prompts)>1,'reason':'Dominant optical instrument'}
+    ai=ControlledAI();blueprint=json.loads(ai.case['blueprint'])
+    blueprint['locations'][0]['image_prompt']='A dominant optical instrument on the workbench'
+    ai.case['blueprint']=db.encode(blueprint)
+    with pytest.raises(InvalidContent):worker.asset_job(job,ai)
+    worker.asset_job(db.one('SELECT * FROM jobs WHERE id=?',(job['id'],)),ai)
+    assert 'optical instrument' in ai.prompts[0]
+    assert 'optical instrument' not in ai.prompts[1]
+    assert 'Keep work surfaces clear' in ai.prompts[1]
+    assert blueprint['locations'][0]['description'] in ai.prompts[1]
     assert db.one('SELECT status FROM jobs WHERE id=?',(job['id'],))['status']=='done'
 
 

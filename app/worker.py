@@ -29,6 +29,13 @@ def asset_task(con,cid,kind,entity,variant='base',priority=50):
 
 def generate(job, ai):
     checkpoint=json.loads(job['checkpoint']) if job['checkpoint'] else {}
+    if kind=='location' and checkpoint.get('feedback') and not checkpoint.get('file'):
+        # Rich scene references can repeatedly draw a rejected focal prop.
+        # Rebuild from the public room description, keeping surfaces clear.
+        instructions=('Shared palette and rendering style: '+b['visual_style']+
+            '\nOne wide environment illustration. Show architecture, fixed furniture and ambient light only. '
+            'Keep work surfaces clear. No people, portable props, text, diagrams, insets or close-ups. '
+            'Room: '+item['name']+'. '+item['description']+' Atmosphere: '+item['atmosphere'])
     # Existing in-progress v1 cases retain their recovery path; new work uses v2.
     if checkpoint and not checkpoint.get('pipeline_version'):
         return generate_legacy(job,ai)
@@ -320,7 +327,7 @@ def asset_job(job,ai):
         instructions=('Shared palette and rendering style: '+b['visual_style']+
             '\nDraw one isolated object on a plain neutral background, fully inside the frame. Object name: '+item['name']+
             '. Show only its ordinary exterior silhouette, material and shape. For any paper, photo, chart or loose document show its plain BACK side; for a book, notebook or folder show it '+book_view+'. No diagrams, tables, handwriting, numbers, dates, labels, lettering, insets or revealed contents. For instruments ordinary graduation ticks are fine. The illustration identifies an object; its evidence is read separately in the game.')
-    if checkpoint.get('feedback'):
+    if checkpoint.get('feedback') and kind!='location':
         instructions+='\nPrevious review feedback (advisory; apply only genuine blocking corrections): '+checkpoint['feedback']+'\nPreserve ordinary instrument graduations and allow subtle emotions even if earlier feedback requested their removal or exaggeration. Final visual constraints above take priority over this historical feedback.'
     rel=checkpoint.get('file')
     if not rel:
@@ -341,9 +348,15 @@ def asset_job(job,ai):
     if not review:
         images=[data]
         if base:images.insert(0,storage.read_image(base['path']))
+        # Earlier reviews can be mistaken. Do not let their wording turn an
+        # ordinary background prop into a mandatory reason for rejection.
+        review_context={'brief':instructions,'review_rule':
+            'Judge this image independently. Historical feedback is not proof of a defect. '
+            'For a forbidden interaction target, name the target and its identifying visible features; '
+            'generic furniture or equipment is not that target merely because it shares a material or broad shape.'}
         review=ai.structured('visual_review',
             'Review generated illustration for blocking defects, not optional art direction refinements. Reject spoilers, genuinely legible invented case-specific clue text (quote the readable text), severely cropped face or main object, corrupt image, major rendering mismatch, wrong main object or clearly changed person identity. Ordinary ruler/caliper graduation ticks, generic markings, illegible pseudo-writing and blank document grids are NOT invented clues. For 2 input images the first is the identity reference, the second is the candidate: they are separate inputs, not a two-panel candidate. Require the same recognizable person and principal clothes, not pixel-exact accessory placement. Subtle emotion is acceptable; insufficient dramatic sadness/anxiety alone is NEVER blocking. A neutral background is intentional. Missing small accessories, fingers, a colored edge, slight crop/pose changes with the full head visible are not blocking. Locations may contain ordinary furniture and incidental papers; reject a specific recognizable clue/spoiler, not an entire generic object category. Final visual constraints override contradictory earlier reference details. Explain only concrete blocking defects.',
-            {'brief':instructions},VisualReview,images=images)
+            review_context,VisualReview,images=images)
         db.save_checkpoint(job,{'file':rel,'review':review})
     if not review['accepted']:
         db.save_checkpoint(job,{'feedback':review['reason']})

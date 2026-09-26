@@ -7,17 +7,18 @@ import io
 import sys
 from pathlib import Path
 sys.path.insert(0,str(Path(__file__).resolve().parents[1]))
-from app import config
+from app import config, imaging
 from openai import OpenAI, APIStatusError, APIConnectionError
 from PIL import Image
 
 
 def check_images(client):
-    options={'model':config.IMAGE_MODEL,'size':'1024x1024','quality':'low','output_format':'png'}
+    options={'model':config.IMAGE_MODEL,'size':config.IMAGE_SQUARE_SIZE,'quality':config.IMAGE_QUALITY,'output_format':config.IMAGE_FORMAT}
+    if config.IMAGE_FORMAT=='webp':options['output_compression']=config.IMAGE_COMPRESSION
     generated=client.images.generate(prompt='A brass key on an ivory background, editorial illustration, no text.',**options)
     data=base64.b64decode(generated.data[0].b64_json,validate=True)
     Image.open(io.BytesIO(data)).verify()
-    edited=client.images.edit(image=('reference.png',data,'image/png'),prompt='Preserve the key and framing. Change only the background to sage green. No text.',**options)
+    edited=client.images.edit(image=('reference.'+imaging.extension(data),data,imaging.media_type(data)),prompt='Preserve the key and framing. Change only the background to sage green. No text.',**options)
     Image.open(io.BytesIO(base64.b64decode(edited.data[0].b64_json,validate=True))).verify()
     print('Image generation and reference editing verified:',config.IMAGE_MODEL)
 
