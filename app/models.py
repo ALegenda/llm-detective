@@ -203,6 +203,11 @@ class CriterionAssessment(Model):
     feedback: str
 
 
+class PenaltyCheck(Model):
+    justified: bool
+    reason: str = Field(min_length=1, description='Identify the actual omitted rubric requirement or contradicted player assertion and its source. Reject deductions whose requested argument already appears elsewhere in the full report.')
+
+
 class QuotedEvaluation(Model):
     claims: list[ClaimAssessment]
     criteria: list[CriterionAssessment]

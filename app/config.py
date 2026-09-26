@@ -16,6 +16,7 @@ STORY_MODEL = os.getenv('OPENAI_STORY_MODEL', 'gpt-6-luna')
 STORY_REASONING = os.getenv('OPENAI_STORY_REASONING', 'medium')
 TEXT_REASONING = os.getenv('OPENAI_TEXT_REASONING', 'none')
 DIALOGUE_REASONING = os.getenv('OPENAI_DIALOGUE_REASONING', 'low')
+EVALUATION_REASONING = os.getenv('OPENAI_EVALUATION_REASONING', 'medium')
 IMAGE_MODEL = os.getenv('OPENAI_IMAGE_MODEL', 'gpt-image-2.5-flare')
 # Explicit sizes/quality keep auto from choosing a more expensive render.
 IMAGE_QUALITY = os.getenv('OPENAI_IMAGE_QUALITY', 'low')

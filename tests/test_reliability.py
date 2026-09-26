@@ -501,3 +501,7 @@ def test_story_calls_use_dedicated_reasoning_model_and_cache_identity(game,monke
     assert calls[-1]['reasoning']=={'effort':'low'}
     ai.structured('interpret','Write',{},StateReview)
     assert calls[-1]['reasoning']=={'effort':'none'}
+    monkeypatch.setattr(config,'EVALUATION_REASONING','medium')
+    for category in ['evaluation','evaluation_audit']:
+        ai.structured(category,'Check report',{'language':'ru'},StateReview)
+        assert calls[-1]['reasoning']=={'effort':'medium'}

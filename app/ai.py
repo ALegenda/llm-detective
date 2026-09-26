@@ -79,8 +79,10 @@ class AI:
         authoring=category.startswith('story_')
         model=config.STORY_MODEL if authoring else config.TEXT_MODEL
         options={'reasoning':{'effort':config.STORY_REASONING}} if authoring else ({'reasoning':{'effort':config.TEXT_REASONING}} if model.startswith('gpt-6') else {})
-        if category in ['dialogue','dialogue_audit','evaluation'] and model.startswith(('gpt-6','gpt-5.4')):
+        if category in ['dialogue','dialogue_audit'] and model.startswith(('gpt-6','gpt-5.4')):
             options={'reasoning':{'effort':config.DIALOGUE_REASONING}}
+        if category in ['evaluation','evaluation_audit'] and model.startswith(('gpt-6','gpt-5.4')):
+            options={'reasoning':{'effort':config.EVALUATION_REASONING}}
         cache_key=db.digest({'prompt_version':config.PROMPT_VERSION,'category':category,'instructions':instructions,'context':context,'model':model,'options':options,'schema':model_type.model_json_schema(),'images':[db.digest(base64.b64encode(i).decode()) for i in images or []]})
         cached=db.one("SELECT response FROM operations WHERE job_id=? AND cache_key=? AND status='done' AND response IS NOT NULL ORDER BY created DESC LIMIT 1",(self.job['id'],cache_key))
         if cached:
@@ -91,7 +93,7 @@ class AI:
         result = self.invoke(category, model, lambda: self.client.responses.parse(
             model=model, **options, instructions=instructions+'\nRequired output language for player-visible strings: '+({'ru':'Russian (русский)','en':'English'}.get(context.get('language') or context.get('settings',{}).get('language'), 'as specified in the brief'))+'.',
             input=[{'role':'user','content':content}], text_format=model_type,
-            max_output_tokens={'blueprint':18000,'story_outline':22000,'story_world':14000,'story_script':18000,'evaluation':8000}.get(category,12000 if authoring else 4000),
+            max_output_tokens={'blueprint':18000,'story_outline':22000,'story_world':14000,'story_script':18000,'evaluation':8000,'evaluation_audit':8000}.get(category,12000 if authoring else 4000),
             store=True),cache_key=cache_key)
         if result.output_parsed is None:
             raise InvalidContent('Model refused or returned incomplete structured data')

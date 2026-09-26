@@ -176,3 +176,65 @@ def test_long_generation_cannot_occupy_the_interactive_worker(game):
     assert db.claim('interactive') is None
     assert db.claim('generation')['kind']=='generate'
     assert db.claim('assets')['kind']=='asset'
+
+
+@pytest.mark.parametrize('justified',[False,True])
+def test_finish_requires_grounded_penalties_and_repairs_before_publishing(client,game,justified):
+    from app import world
+    b,s=game
+    explanation='Ирина перенесла письмо. Дату я сопоставила с журналом.'
+    for c in b['checks']:
+        world.add_evidence(s,c['id'],c['intent'],c['result'],'observation','Источник')
+    evidence=[c['id'] for c in b['checks']]
+    with db.transaction() as con:
+        con.execute('UPDATE attempts SET state=? WHERE id=?',(db.encode(s),'a1'))
+    response=client.post('/api/attempts/a1/commands',json={'kind':'finish','text':explanation,'evidence':evidence,'confirmed':True,'version':0},headers={'Idempotency-Key':'penalty-audit'})
+    assert response.status_code==202
+    job=db.claim()
+    class Reviewer:
+        case=db.one("SELECT * FROM cases WHERE id='c1'")
+        drafts=0
+        audits=0
+        def structured(self,category,prompt,context,schema):
+            assert context['explanation']==explanation
+            assert context['cited'] and 'public_action_history' in context
+            if category=='evaluation_audit':
+                self.audits+=1
+                assert set(context['penalties'])=={'criterion_0'}
+                # No omission of a proposed penalty is allowed by the schema.
+                from pydantic import ValidationError
+                with pytest.raises(ValidationError):schema.model_validate({})
+                return schema.model_validate({'criterion_0':{'justified':justified,'reason':'Genuine missing causal link' if justified else 'The requested comparison is already in the second sentence.'}}).model_dump()
+            assert category=='evaluation'
+            self.drafts+=1
+            if self.drafts>1:
+                assert 'already in the second sentence' in str(context['repair_feedback'])
+            count=len(context['rubric'])
+            raw={'claims':[{'quote':'Ирина перенесла письмо.','status':'accurate','feedback':'Верно'}],
+                 'criteria':[{'criterion_index':i,'satisfied':i!=0 or self.drafts>1,'credit':1 if i==0 and self.drafts==1 else 2,'quote':'Ирина перенесла письмо.','evidence_ids':evidence,'feedback':'Разбор'} for i in range(count)],'evidence_assessment':[]}
+            return schema.model_validate(raw).model_dump()
+    ai=Reviewer()
+    if not justified:
+        with pytest.raises(InvalidContent,match='Reassess unjustified deductions'):
+            worker.command_job(job,ai)
+        attempt=db.one("SELECT * FROM attempts WHERE id='a1'")
+        assert attempt['status']=='active' and attempt['version']==0 and attempt['verdict'] is None
+        job=db.one('SELECT * FROM jobs WHERE id=?',(job['id'],))
+        cp=json.loads(job['checkpoint'])
+        assert 'evaluation' not in cp and cp['evaluation_draft'] and cp['evaluation_feedback']
+    worker.command_job(job,ai)
+    verdict=client.get('/api/attempts/a1').json()['verdict']['evaluation']
+    assert verdict['criteria'][0]['credit']==(1 if justified else 2)
+    assert verdict['proved']==(not justified)
+    assert ai.audits==1  # A clean repaired result does not incur another audit.
+
+
+def test_wrong_assertion_penalty_also_requires_independent_review():
+    raw=report([2]);raw['claims'][0]['status']='mistaken'
+    class Reviewer:
+        def structured(self,category,prompt,context,schema):
+            assert category=='evaluation_audit'
+            assert set(schema.model_fields)=={'claim_0'}
+            return schema.model_validate({'claim_0':{'justified':False,'reason':'The report says this was not proved, rather than asserting it happened.'}}).model_dump()
+    with pytest.raises(InvalidContent,match='claim_0'):
+        worker.audit_evaluation_penalties(Reviewer(),{'explanation':'Моя версия.'},raw)

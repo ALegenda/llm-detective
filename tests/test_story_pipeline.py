@@ -162,7 +162,7 @@ class FakeAuthor:
             self.fail_once=None
             raise ProviderFailure('provider_connection_unknown',True)
         result={'story_outline':self.outline,'story_world':make_plan(),'story_script':make_script(),
-                'story_contract_audit':{key:{'passed':True,'stage':'script','reason':'Grounded'} for key in ['continuity','discoveries']+[f'f_{i+1}' for i in range(7)]+[f'n_{i+1}' for i in range(3)]},
+                'story_contract_audit':{key:{'passed':True,'stage':'script','reason':'Grounded'} for key in ['continuity','discoveries','grading']+[f'f_{i+1}' for i in range(7)]+[f'n_{i+1}' for i in range(3)]},
                 'story_reader':{'culprits':['n_1'],'method':'Переложено','motive':'Скрыть время','reasoning':'Документы сходятся','supporting_evidence':['f_1','f_2'],'unresolved_ambiguities':[],'identity_resolved':True,'method_resolved':True,'motive_resolved':True},
                 'story_fact_audit':{'issues':[],'strengths':[]},
                 'story_audit':{'issues':self.audit_issues,'strengths':['Материальные маршруты']},'story_adjudication':{'blocking_issue_indices':list(range(len(self.audit_issues))),'reasoning':'Verified'}}[category]
@@ -361,7 +361,7 @@ def test_public_cast_fields_cannot_disclose_guilt_before_play(outline,field):
     with pytest.raises(ValueError,match='guilt label'):validate_outline(outline,SETTINGS)
 
 
-@pytest.mark.parametrize('target,stage', [('f_2','script'),('n_2','outline'),('continuity','outline'),('discoveries','outline')])
+@pytest.mark.parametrize('target,stage', [('f_2','script'),('n_2','outline'),('continuity','outline'),('discoveries','outline'),('grading','outline')])
 def test_contract_failure_blocks_publication_before_general_audit(game,outline,target,stage):
     j=queue_job('generate');ai=FakeAuthor(outline);original=ai.structured
     def review(category,prompt,context,schema):
