@@ -328,19 +328,19 @@ def asset_job(job,ai):
             storage.prune_discarded_images()
             if not storage.image_space_available():
                 raise ProviderFailure('storage_full',True,300)
-        data=ai.image(instructions,str(config.DATA/base['path']) if base else None,landscape=kind=='location')
+        data=ai.image(instructions,storage.read_image(base['path']) if base else None,landscape=kind=='location')
         # Generation can take minutes while other workers save data. Check
         # again with the actual image size before consuming the DB reserve.
         if not storage.image_space_available(len(data)):
             raise ProviderFailure('storage_full',True,300)
         rel='assets/'+db.uid()+'.png'
-        path=config.DATA/rel; tmp=path.with_suffix('.part');tmp.write_bytes(data);tmp.replace(path)
+        storage.write_image(rel,data)
         db.save_checkpoint(job,{'file':rel})
-    else:data=(config.DATA/rel).read_bytes()
+    else:data=storage.read_image(rel)
     review=checkpoint.get('review')
     if not review:
         images=[data]
-        if base:images.insert(0,(config.DATA/base['path']).read_bytes())
+        if base:images.insert(0,storage.read_image(base['path']))
         review=ai.structured('visual_review',
             'Review generated illustration for blocking defects, not optional art direction refinements. Reject spoilers, genuinely legible invented case-specific clue text (quote the readable text), severely cropped face or main object, corrupt image, major rendering mismatch, wrong main object or clearly changed person identity. Ordinary ruler/caliper graduation ticks, generic markings, illegible pseudo-writing and blank document grids are NOT invented clues. For 2 input images the first is the identity reference, the second is the candidate: they are separate inputs, not a two-panel candidate. Require the same recognizable person and principal clothes, not pixel-exact accessory placement. Subtle emotion is acceptable; insufficient dramatic sadness/anxiety alone is NEVER blocking. A neutral background is intentional. Missing small accessories, fingers, a colored edge, slight crop/pose changes with the full head visible are not blocking. Locations may contain ordinary furniture and incidental papers; reject a specific recognizable clue/spoiler, not an entire generic object category. Final visual constraints override contradictory earlier reference details. Explain only concrete blocking defects.',
             {'brief':instructions},VisualReview,images=images)
@@ -349,7 +349,7 @@ def asset_job(job,ai):
         db.save_checkpoint(job,{'feedback':review['reason']})
         # This rejected candidate has no asset record and is no longer needed
         # by the job. Previously every rejection left its PNG on disk forever.
-        (config.DATA/rel).unlink(missing_ok=True)
+        storage.delete_image(rel)
         raise InvalidContent(review['reason'])
     with db.transaction() as con:
         if not db.fenced(con,job):return

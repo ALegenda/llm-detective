@@ -53,7 +53,30 @@ def disk_report():
 
 def image_space_available(additional_bytes=0):
     # Image generation must leave room for saved progress and SQLite's journal.
-    return shutil.disk_usage(config.DATA).free >= IMAGE_RESERVE+additional_bytes
+    return shutil.disk_usage(config.DATA).free >= IMAGE_RESERVE+(0 if config.ASSET_STORAGE=='r2' else additional_bytes)
+
+
+def read_image(path):
+    if config.ASSET_STORAGE=='r2':
+        from . import object_store
+        return object_store.read(path)
+    return (config.DATA/path).read_bytes()
+
+
+def write_image(path,data):
+    if config.ASSET_STORAGE=='r2':
+        from . import object_store
+        object_store.write(path,data)
+    else:
+        target=config.DATA/path
+        tmp=target.with_suffix('.part');tmp.write_bytes(data);tmp.replace(target)
+
+
+def delete_image(path):
+    if config.ASSET_STORAGE=='r2':
+        from . import object_store
+        object_store.delete(path)
+    else:(config.DATA/path).unlink(missing_ok=True)
 
 
 def prune_discarded_images(min_age=3600):

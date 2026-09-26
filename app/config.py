@@ -31,9 +31,20 @@ TELEGRAM_ADMIN_IDS = {x.strip() for x in os.getenv('TELEGRAM_ADMIN_IDS', '').spl
 TELEGRAM_ISSUER = 'https://oauth.telegram.org'
 SCHEMA_VERSION = 4
 PROMPT_VERSION = '2026-09-25.4'
+ASSET_STORAGE = os.getenv('ASSET_STORAGE','local')
+R2_ENDPOINT_URL = os.getenv('R2_ENDPOINT_URL','')
+R2_BUCKET = os.getenv('R2_BUCKET','')
+R2_ACCESS_KEY_ID = os.getenv('R2_ACCESS_KEY_ID','')
+R2_SECRET_ACCESS_KEY = os.getenv('R2_SECRET_ACCESS_KEY','')
+R2_MIGRATE_LOCAL = os.getenv('R2_MIGRATE_LOCAL','0') == '1'
+R2_MAX_BYTES = int(os.getenv('R2_MAX_BYTES','9000000000'))
 
 
 def preflight():
+    if ASSET_STORAGE not in {'local','r2'}:
+        raise RuntimeError('Unsupported ASSET_STORAGE')
+    if ASSET_STORAGE=='r2' and (not all((R2_ENDPOINT_URL,R2_BUCKET,R2_ACCESS_KEY_ID,R2_SECRET_ACCESS_KEY)) or not R2_ENDPOINT_URL.startswith('https://')):
+        raise RuntimeError('Complete HTTPS R2 configuration is required')
     if not os.getenv('OPENAI_API_KEY'):
         raise RuntimeError('OPENAI_API_KEY is required. No demo fallback is provided.')
     if bool(TELEGRAM_CLIENT_ID) != bool(TELEGRAM_CLIENT_SECRET):

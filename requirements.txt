@@ -5,3 +5,4 @@ openai==2.44.0
 pillow==11.1.0
 httpx==0.28.1
 pyjwt[crypto]==2.10.1
+boto3==1.43.103

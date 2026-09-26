@@ -104,6 +104,8 @@ class AI:
         kwargs = dict(model=config.IMAGE_MODEL, prompt=prompt, size='1536x1024' if landscape else '1024x1024', quality='low', output_format='png')
         if reference:
             def edit():
+                if isinstance(reference,bytes):
+                    return self.client.images.edit(image=('reference.png',reference,'image/png'), **kwargs)
                 with open(reference, 'rb') as f:
                     return self.client.images.edit(image=f, **kwargs)
             response = self.invoke('image_edit', config.IMAGE_MODEL, edit)

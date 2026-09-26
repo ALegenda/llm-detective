@@ -16,7 +16,7 @@ import httpx
 import jwt
 from jwt import PyJWKClient
 from fastapi import FastAPI, Request, HTTPException, Depends
-from fastapi.responses import FileResponse, JSONResponse, RedirectResponse
+from fastapi.responses import FileResponse, JSONResponse, RedirectResponse, Response
 from fastapi.staticfiles import StaticFiles
 from . import config, db, world, worker
 from .models import Settings, AuthInput, CommandInput, NoteInput, StoryFeedback
@@ -106,7 +106,11 @@ async def lifespan(app):
     from . import storage
     config.preflight()
     print('STORAGE_DIAGNOSTIC '+json.dumps(storage.disk_report(),sort_keys=True),flush=True)
+    from . import object_store
+    await asyncio.to_thread(object_store.migrate_local)
     db.init()
+    if config.ASSET_STORAGE=='r2':
+        print('STORAGE_READY '+json.dumps(storage.disk_report(),sort_keys=True),flush=True)
     storage.prune_discarded_images()
     stop=threading.Event()
     count=max(3,min(4,int(os.getenv('WORKERS','3'))))
@@ -136,7 +140,7 @@ async def security(request,call_next):
     response.headers['X-Content-Type-Options']='nosniff'
     response.headers['Referrer-Policy']='same-origin'
     response.headers['Content-Security-Policy']="default-src 'self'; img-src 'self' data:; style-src 'self' 'unsafe-inline'; script-src 'self'; connect-src 'self'; frame-ancestors 'none'; base-uri 'self'; form-action 'self'"
-    if request.url.path.startswith('/api/'):response.headers['Cache-Control']='no-store'
+    if request.url.path.startswith('/api/'):response.headers.setdefault('Cache-Control','no-store')
     elif request.url.path=='/' or request.url.path.endswith(('.js','.css','.html')):response.headers['Cache-Control']='no-cache'
     return response
 
@@ -477,7 +481,8 @@ def asset(asset_id:str,user=Depends(authenticate)):
     # A player who previously observed an asset can access it; never raw storage URLs.
     allowed=any(permitted_asset(a,b,json.loads(x['state'])) for x in attempts)
     if not allowed:raise HTTPException(404)
-    return FileResponse(config.DATA/a['path'],media_type='image/png',headers={'Cache-Control':'private, max-age=3600'})
+    from . import storage
+    return Response(storage.read_image(a['path']),media_type='image/png',headers={'Cache-Control':'private, max-age=3600'})
 
 
 def retry_job(jid,user,is_admin):
