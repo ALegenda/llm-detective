@@ -9,7 +9,7 @@ from test_storage import ImageAI
 
 
 class FakeS3:
-    def __init__(self):self.objects={};self.uploads=0;self.corrupt=False;self.gets=0
+    def __init__(self):self.objects={};self.content_types={};self.uploads=0;self.corrupt=False;self.gets=0
     def head_object(self,**kw):
         if kw['Key'] not in self.objects:
             raise ClientError({'Error':{'Code':'404'}},'HeadObject')
@@ -19,6 +19,7 @@ class FakeS3:
         assert kw['IfNoneMatch']=='*'
         assert kw['Metadata']['sha256']==hashlib.sha256(kw['Body']).hexdigest()
         self.objects[kw['Key']]=kw['Body'];self.uploads+=1
+        self.content_types[kw['Key']]=kw['ContentType']
     def get_object(self,**kw):
         self.gets+=1
         return {'Body':io.BytesIO(b'corrupt' if self.corrupt else self.objects[kw['Key']])}

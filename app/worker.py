@@ -8,7 +8,7 @@ import time
 from pathlib import Path
 from typing import Literal
 from pydantic import create_model, Field
-from . import config, db, world, storage
+from . import config, db, world, storage, imaging
 from .ai import AI, ProviderFailure, InvalidContent
 from .generation import GENERATOR, validate_blueprint
 from .models import Blueprint, Review, StateReview, Interpretation, Speech, DialogueDraft, StatementExcerpt, SpeechAudit, Evaluation, QuotedEvaluation, ClaimAssessment, CriterionAssessment, VisualReview
@@ -333,7 +333,7 @@ def asset_job(job,ai):
         # again with the actual image size before consuming the DB reserve.
         if not storage.image_space_available(len(data)):
             raise ProviderFailure('storage_full',True,300)
-        rel='assets/'+db.uid()+'.png'
+        rel='assets/'+db.uid()+'.'+imaging.extension(data)
         storage.write_image(rel,data)
         db.save_checkpoint(job,{'file':rel})
     else:data=storage.read_image(rel)

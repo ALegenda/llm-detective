@@ -88,7 +88,7 @@ def prune_discarded_images(min_age=3600):
     count=0
     for path in (config.DATA/'assets').iterdir():
         # Generated UUID files only; do not touch backups or unknown user files.
-        if path.is_symlink() or not path.is_file() or path.suffix not in {'.png','.part'}:continue
+        if path.is_symlink() or not path.is_file() or path.suffix not in {'.png','.webp','.part'}:continue
         if len(path.stem)!=32 or any(c not in '0123456789abcdef' for c in path.stem):continue
         if str(path.relative_to(config.DATA)) in referenced:continue
         try:

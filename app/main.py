@@ -18,7 +18,7 @@ from jwt import PyJWKClient
 from fastapi import FastAPI, Request, HTTPException, Depends
 from fastapi.responses import FileResponse, JSONResponse, RedirectResponse, Response
 from fastapi.staticfiles import StaticFiles
-from . import config, db, world, worker
+from . import config, db, world, worker, imaging
 from .models import Settings, AuthInput, CommandInput, NoteInput, StoryFeedback
 
 
@@ -109,6 +109,9 @@ async def lifespan(app):
     from . import object_store
     await asyncio.to_thread(object_store.migrate_local)
     db.init()
+    print('IMAGE_CONFIG '+json.dumps({'model':config.IMAGE_MODEL,'quality':config.IMAGE_QUALITY,
+        'format':config.IMAGE_FORMAT,'compression':config.IMAGE_COMPRESSION,
+        'square_size':config.IMAGE_SQUARE_SIZE,'landscape_size':config.IMAGE_LANDSCAPE_SIZE}),flush=True)
     if config.ASSET_STORAGE=='r2':
         print('STORAGE_READY '+json.dumps(storage.disk_report(),sort_keys=True),flush=True)
     storage.prune_discarded_images()
@@ -482,7 +485,7 @@ def asset(asset_id:str,user=Depends(authenticate)):
     allowed=any(permitted_asset(a,b,json.loads(x['state'])) for x in attempts)
     if not allowed:raise HTTPException(404)
     from . import storage
-    return Response(storage.read_image(a['path']),media_type='image/png',headers={'Cache-Control':'private, max-age=3600'})
+    return Response(storage.read_image(a['path']),media_type=imaging.path_media_type(a['path']),headers={'Cache-Control':'private, max-age=3600'})
 
 
 def retry_job(jid,user,is_admin):

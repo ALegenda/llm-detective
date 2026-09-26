@@ -9,12 +9,28 @@ Credentials are stored only in the Render service's environment variables.
 Set `ASSET_STORAGE=r2`, `R2_ENDPOINT_URL`, `R2_BUCKET`, `R2_ACCESS_KEY_ID`, and
 `R2_SECRET_ACCESS_KEY`. See `.env.example` for variable names; never commit values.
 
-PNG generation, QA, portrait reference loading, and authenticated image responses
+Image generation, QA, portrait reference loading, and authenticated image responses
 use memory and R2 directly. They do not write image files or image caches to the
-Render filesystem. Asset keys retain the existing `assets/<uuid>.png` format, so
-database references and browser URLs stay valid. `/api/assets/<id>` checks both
+Render filesystem. Existing `assets/<uuid>.png` keys are retained; new renders use
+`assets/<uuid>.webp`. Database references and browser URLs stay valid. `/api/assets/<id>` checks both
 ownership and player discovery before reading R2. Buckets and hidden clues remain
 private. Browser image responses permit private caching for one hour.
+
+New renders default to `gpt-image-2.5-flare`, explicit `low` quality, WebP with
+`output_compression=80`, 832×832 portraits/objects and 1152×768 landscapes. The
+square and 3:2 framing is preserved. This reduces pixel area by 33.98% and 43.75%
+respectively compared with the prior 1024×1024 and 1536×1024 settings. Pixel-area
+reduction is not a measured token-saving percentage. WebP compression saves file
+bytes, not generation tokens. Log records `IMAGE_CONFIG` and `IMAGE_RENDERED`
+report effective settings, actual dimensions/bytes and provider token usage,
+without image contents, prompts, credentials or story answers.
+
+The API checks the decoded output format; R2 metadata, authenticated responses,
+visual-review data URLs and edit references all use the correct PNG/WebP MIME.
+Old PNG checkpoints resume without paying to redraw them. Rejected WebP candidates
+are removed through the same verified storage path as PNG candidates. Environment
+settings are listed in `.env.example`; changing a code default alone does not
+override a pre-existing `OPENAI_IMAGE_MODEL` on Render.
 
 Rejected new candidates are deleted from R2 after the job's feedback checkpoint
 is saved. The dedicated bucket's application storage cap defaults to 9,000,000,000

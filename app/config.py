@@ -17,6 +17,13 @@ STORY_REASONING = os.getenv('OPENAI_STORY_REASONING', 'medium')
 TEXT_REASONING = os.getenv('OPENAI_TEXT_REASONING', 'none')
 DIALOGUE_REASONING = os.getenv('OPENAI_DIALOGUE_REASONING', 'low')
 IMAGE_MODEL = os.getenv('OPENAI_IMAGE_MODEL', 'gpt-image-2.5-flare')
+# Explicit sizes/quality keep auto from choosing a more expensive render.
+IMAGE_QUALITY = os.getenv('OPENAI_IMAGE_QUALITY', 'low')
+IMAGE_FORMAT = os.getenv('OPENAI_IMAGE_FORMAT', 'webp')
+IMAGE_COMPRESSION = int(os.getenv('OPENAI_IMAGE_COMPRESSION', '80'))
+_custom_image_sizes = IMAGE_MODEL.startswith(('gpt-image-2.', 'gpt-image-2-')) or IMAGE_MODEL == 'gpt-image-2'
+IMAGE_SQUARE_SIZE = os.getenv('OPENAI_IMAGE_SQUARE_SIZE', '832x832' if _custom_image_sizes else '1024x1024')
+IMAGE_LANDSCAPE_SIZE = os.getenv('OPENAI_IMAGE_LANDSCAPE_SIZE', '1152x768' if _custom_image_sizes else '1536x1024')
 PRODUCTION = os.getenv('APP_ENV') == 'production'
 # Render sets RENDER_EXTERNAL_URL (https://….onrender.com); prefer explicit APP_ORIGIN.
 ORIGIN = (
@@ -41,6 +48,17 @@ R2_MAX_BYTES = int(os.getenv('R2_MAX_BYTES','9000000000'))
 
 
 def preflight():
+    if IMAGE_FORMAT not in {'png','webp'} or not 0 <= IMAGE_COMPRESSION <= 100:
+        raise RuntimeError('Image output must be PNG or WebP with compression between 0 and 100')
+    if IMAGE_QUALITY not in {'low','medium','high','xhigh','max'}:
+        raise RuntimeError('An explicit image quality is required')
+    for size in (IMAGE_SQUARE_SIZE,IMAGE_LANDSCAPE_SIZE):
+        try:
+            width,height=map(int,size.split('x'))
+            valid=(min(width,height)>0 and max(width,height)<=3840 and width%16==height%16==0
+                and 655360<=width*height<=8294400 and max(width,height)<=3*min(width,height))
+        except ValueError:valid=False
+        if not valid:raise RuntimeError('Unsupported image dimensions')
     if ASSET_STORAGE not in {'local','r2'}:
         raise RuntimeError('Unsupported ASSET_STORAGE')
     if ASSET_STORAGE=='r2' and (not all((R2_ENDPOINT_URL,R2_BUCKET,R2_ACCESS_KEY_ID,R2_SECRET_ACCESS_KEY)) or not R2_ENDPOINT_URL.startswith('https://')):

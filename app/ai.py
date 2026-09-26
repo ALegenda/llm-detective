@@ -7,7 +7,7 @@ import time
 from pathlib import Path
 from openai import OpenAI, APIStatusError, APITimeoutError, APIConnectionError
 from PIL import Image
-from . import config, db
+from . import config, db, imaging
 
 
 class ProviderFailure(Exception):
@@ -87,7 +87,7 @@ class AI:
             return model_type.model_validate(json.loads(cached['response'])).model_dump()
         content = [{'type':'input_text','text':db.encode(context)}]
         for data in images or []:
-            content.append({'type':'input_image','image_url':'data:image/png;base64,' + base64.b64encode(data).decode()})
+            content.append({'type':'input_image','image_url':'data:'+imaging.media_type(data)+';base64,' + base64.b64encode(data).decode()})
         result = self.invoke(category, model, lambda: self.client.responses.parse(
             model=model, **options, instructions=instructions+'\nRequired output language for player-visible strings: '+({'ru':'Russian (русский)','en':'English'}.get(context.get('language') or context.get('settings',{}).get('language'), 'as specified in the brief'))+'.',
             input=[{'role':'user','content':content}], text_format=model_type,
@@ -101,11 +101,14 @@ class AI:
         return parsed
 
     def image(self, prompt, reference=None, landscape=False):
-        kwargs = dict(model=config.IMAGE_MODEL, prompt=prompt, size='1536x1024' if landscape else '1024x1024', quality='low', output_format='png')
+        kwargs = dict(model=config.IMAGE_MODEL, prompt=prompt,
+            size=config.IMAGE_LANDSCAPE_SIZE if landscape else config.IMAGE_SQUARE_SIZE,
+            quality=config.IMAGE_QUALITY, output_format=config.IMAGE_FORMAT)
+        if config.IMAGE_FORMAT=='webp':kwargs['output_compression']=config.IMAGE_COMPRESSION
         if reference:
             def edit():
                 if isinstance(reference,bytes):
-                    return self.client.images.edit(image=('reference.png',reference,'image/png'), **kwargs)
+                    return self.client.images.edit(image=('reference.'+imaging.extension(reference),reference,imaging.media_type(reference)), **kwargs)
                 with open(reference, 'rb') as f:
                     return self.client.images.edit(image=f, **kwargs)
             response = self.invoke('image_edit', config.IMAGE_MODEL, edit)
@@ -118,8 +121,12 @@ class AI:
             im = Image.open(io.BytesIO(data))
             im.verify()
             im = Image.open(io.BytesIO(data))
-            if im.width < 512 or im.height < 512 or im.format != 'PNG':
+            if im.width < 512 or im.height < 512 or im.format != config.IMAGE_FORMAT.upper():
                 raise ValueError()
         except Exception:
             raise InvalidContent('Image file failed validation') from None
+        usage=getattr(response,'usage',None)
+        print('IMAGE_RENDERED '+json.dumps({'model':config.IMAGE_MODEL,'size':f'{im.width}x{im.height}',
+            'quality':config.IMAGE_QUALITY,'format':im.format.lower(),'bytes':len(data),
+            'input_tokens':getattr(usage,'input_tokens',None),'output_tokens':getattr(usage,'output_tokens',None)}),flush=True)
         return data

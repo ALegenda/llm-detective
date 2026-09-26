@@ -9,7 +9,7 @@ from functools import lru_cache
 import boto3
 from botocore.config import Config
 from botocore.exceptions import ClientError
-from . import config
+from . import config, imaging
 
 _writes=threading.Lock()
 
@@ -24,7 +24,7 @@ def client():
 
 
 def key(path):
-    if not re.fullmatch(r'assets/[a-f0-9]{32}\.(png|part)',path):
+    if not re.fullmatch(r'assets/[a-f0-9]{32}\.(png|webp|part)',path):
         raise ValueError('Invalid image storage key')
     return path
 
@@ -52,7 +52,7 @@ def ensure_uploaded(path,data):
         existing=None
     if existing is None:
         client().put_object(Bucket=config.R2_BUCKET,Key=path,Body=data,
-            ContentType='image/png',StorageClass='STANDARD',Metadata={'sha256':sha},IfNoneMatch='*')
+            ContentType=imaging.path_media_type(path),StorageClass='STANDARD',Metadata={'sha256':sha},IfNoneMatch='*')
     remote=read(path)
     if len(remote)!=len(data) or hashlib.sha256(remote).hexdigest()!=sha:
         raise RuntimeError('Remote image verification failed; local copy retained')
